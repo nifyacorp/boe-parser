@@ -6,22 +6,7 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const loggerConfig = {
   level: LOG_LEVEL,
   messageKey: 'message',
-  serializers: {
-    error: pino.stdSerializers.err,
-    req: pino.stdSerializers.req,
-    res: pino.stdSerializers.res
-  },
-  formatters: {
-    level: (label) => ({ severity: label.toUpperCase() }),
-    bindings: () => ({})
-  },
-  timestamp: () => `,"time":"${new Date().toISOString()}"`,
-  base: null
-};
-
-// Only use pino-pretty in development
-if (isDevelopment) {
-  loggerConfig.transport = {
+  transport: {
     target: 'pino-pretty',
     options: {
       colorize: true,
@@ -31,7 +16,29 @@ if (isDevelopment) {
       singleLine: false,
       levelFirst: true
     }
-  };
-}
+  },
+  serializers: {
+    error: pino.stdSerializers.err,
+    req: pino.stdSerializers.req,
+    res: pino.stdSerializers.res
+  },
+  formatters: {
+    level: (label) => ({ level: label.toUpperCase() }),
+    bindings: () => ({}),
+    log: (object) => {
+      // Ensure objects are properly stringified
+      const processed = {};
+      for (const [key, value] of Object.entries(object)) {
+        if (typeof value === 'object' && value !== null) {
+          processed[key] = JSON.stringify(value, null, 2);
+        } else {
+          processed[key] = value;
+        }
+      }
+      return processed;
+    }
+  },
+  timestamp: pino.stdTimeFunctions.isoTime
+};
 
 export const logger = pino(loggerConfig);
