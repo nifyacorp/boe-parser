@@ -4,19 +4,44 @@ import { logger } from '../utils/logger.js';
 const MAX_CHUNK_SIZE = 25; // Reduced chunk size
 const MAX_CONCURRENT_REQUESTS = 3; // Limit concurrent requests
 
+// Define expected response structure for validation
+const responseSchema = {
+  matches: [{
+    document_type: ['RESOLUTION', 'ORDER', 'ROYAL_DECREE', 'LAW', 'ANNOUNCEMENT', 'OTHER'],
+    issuing_body: '',
+    title: '',
+    dates: {
+      document_date: '',
+      publication_date: ''
+    },
+    code: '',
+    section: '',
+    department: '',
+    links: {
+      pdf: '',
+      html: ''
+    },
+    relevance_score: 0,
+    summary: ''
+  }],
+  metadata: {
+    match_count: 0,
+    max_relevance: 0
+  }
+};
+
 let openai;
 
 async function analyzeChunk(chunk, query, reqId) {
   try {
-    // Create the complete payload
     const payload = {
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications.
+          content: `You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications. You must return a valid JSON object with the exact structure shown below.
 
-Return ONLY a valid JSON response with the following structure:
+REQUIRED RESPONSE FORMAT:
 {
   "matches": [{
     "document_type": "string (RESOLUTION, ORDER, ROYAL_DECREE, LAW, ANNOUNCEMENT)",
@@ -42,7 +67,9 @@ Return ONLY a valid JSON response with the following structure:
   }
 }
 
-Focus on finding the most relevant documents based on the user's query.`
+CRITICAL REQUIREMENTS:
+1. Response MUST be valid JSON - no markdown, no backticks, no explanations
+2. All fields are required - use empty strings or 0 for missing values`
         },
         {
           role: "user",
@@ -50,6 +77,7 @@ Focus on finding the most relevant documents based on the user's query.`
         }
       ],
       max_tokens: 500
+      temperature: 0 // Reduce randomness for more consistent formatting
     };
 
     logger.debug({ 
@@ -73,12 +101,26 @@ Focus on finding the most relevant documents based on the user's query.`
       completionTokens: response.usage?.completion_tokens,
       totalTokens: response.usage?.total_tokens
     }, 'Raw OpenAI response');
+    
+    // Clean the response content
+    let cleanContent = response.choices[0].message.content.trim();
+    
+    // Remove any markdown code block markers if present
+    cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
 
     try {
-      const parsedResponse = JSON.parse(response.choices[0].message.content);
+      const parsedResponse = JSON.parse(cleanContent);
+      
+      // Validate response structure
+      if (!parsedResponse.matches || !Array.isArray(parsedResponse.matches) || !parsedResponse.metadata) {
+        throw new Error('Invalid response structure');
+      }
+      
       logger.debug({
         reqId,
-        parsedResponse
+        parsedResponse,
+        matchCount: parsedResponse.matches.length,
+        maxRelevance: parsedResponse.metadata.max_relevance
       }, 'Successfully parsed OpenAI response');
       return parsedResponse;
     } catch (parseError) {
@@ -86,7 +128,7 @@ Focus on finding the most relevant documents based on the user's query.`
         reqId, 
         error: parseError.message,
         rawResponse: response.choices[0].message.content 
-      }, 'Failed to parse OpenAI response');
+      }, `Failed to parse OpenAI response: ${parseError.message}`);
       throw parseError;
     }
 
