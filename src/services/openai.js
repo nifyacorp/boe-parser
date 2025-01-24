@@ -36,6 +36,8 @@ async function analyzeChunk(chunk, query, reqId) {
   try {
     const payload = {
       model: "gpt-4o-mini",
+      temperature: 0,
+      response_format: { type: "json" },
       messages: [
         {
           role: "system",
@@ -93,8 +95,15 @@ CRITICAL REQUIREMENTS:
     
     logger.debug({ 
       reqId, 
-      msg: 'Raw OpenAI response',
-      response: JSON.stringify(response, null, 2)
+      response: {
+        id: response.id,
+        model: response.model,
+        choices: response.choices.map(choice => ({
+          content: choice.message.content,
+          finish_reason: choice.finish_reason
+        })),
+        usage: response.usage
+      }
     }, 'Raw OpenAI response');
     
     // Clean the response content
@@ -120,15 +129,37 @@ CRITICAL REQUIREMENTS:
       return parsedResponse;
     } catch (parseError) {
       logger.error({ 
-        reqId, 
-        error: parseError.message,
-        rawResponse: response.choices[0].message.content 
-      }, `Failed to parse OpenAI response: ${parseError.message}`);
+        reqId,
+        error: {
+          name: parseError.name,
+          message: parseError.message,
+          stack: parseError.stack
+        },
+        rawResponse: {
+          content: response.choices[0].message.content,
+          length: response.choices[0].message.content.length
+        }
+      }, 'Failed to parse OpenAI response');
       throw parseError;
     }
 
   } catch (error) {
-    logger.error({ reqId, error: error.message }, 'Chunk analysis failed');
+    logger.error({ 
+      reqId,
+      error: {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        type: error.type,
+        stack: error.stack,
+        status: error.status
+      },
+      context: {
+        chunkSize: chunk.length,
+        queryLength: query.length,
+        modelUsed: "gpt-4o-mini"
+      }
+    }, 'Chunk analysis failed');
     return { matches: [], metadata: { match_count: 0, max_relevance: 0 } };
   }
 }
