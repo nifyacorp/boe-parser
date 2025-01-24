@@ -77,16 +77,19 @@ CRITICAL REQUIREMENTS:
         }
       ],
       max_tokens: 500
-      temperature: 0 // Reduce randomness for more consistent formatting
+      temperature: 0,
+      response_format: { type: "json" }
     };
 
     logger.debug({ 
       reqId, 
-      query,
-      chunkSize: chunk.length,
-      chunkContent: chunk,
-      systemPrompt: payload.messages[0].content,
-      userPrompt: payload.messages[1].content
+      payload: {
+        model: payload.model,
+        messages: payload.messages,
+        max_tokens: payload.max_tokens,
+        temperature: payload.temperature,
+        response_format: payload.response_format
+      }
     }, 'OpenAI request payload');
 
     const response = await openai.chat.completions.create({
@@ -95,11 +98,13 @@ CRITICAL REQUIREMENTS:
     
     logger.debug({ 
       reqId, 
-      responseContent: response.choices[0].message.content,
-      model: response.model,
-      promptTokens: response.usage?.prompt_tokens,
-      completionTokens: response.usage?.completion_tokens,
-      totalTokens: response.usage?.total_tokens
+      response: {
+        id: response.id,
+        model: response.model,
+        choices: response.choices,
+        usage: response.usage,
+        created: response.created
+      }
     }, 'Raw OpenAI response');
     
     // Clean the response content
