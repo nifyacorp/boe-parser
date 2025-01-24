@@ -14,8 +14,7 @@ async function analyzeChunk(chunk, query, reqId) {
       messages: [
         {
           role: "system",
-          content: "You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications. Return a structured JSON response with matches that include: document_type, issuing_body, title, dates, code, section, department, links, and a relevance score (0-1). Provide a concise summary for each match. Focus on finding the most relevant documents based on the user's query."
-          content: `You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications. 
+          content: `You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications.
 
 Return ONLY a valid JSON response with the following structure:
 {
@@ -41,7 +40,9 @@ Return ONLY a valid JSON response with the following structure:
     "match_count": "number",
     "max_relevance": "number"
   }
-}`
+}
+
+Focus on finding the most relevant documents based on the user's query.`
         },
         {
           role: "user",
