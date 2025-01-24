@@ -8,7 +8,7 @@ let openai;
 
 async function analyzeChunk(chunk, query, reqId) {
   try {
-    const response = await openai.chat.completions.create({
+    const payload = {
       model: "gpt-4o-mini",
       messages: [
         {
@@ -21,10 +21,21 @@ async function analyzeChunk(chunk, query, reqId) {
         }
       ],
       max_tokens: 500
+    };
+
+    logger.debug({ 
+      reqId,
+      payload,
+      chunkSize: chunk.length
+    }, 'OpenAI request payload');
+
+    const response = await openai.chat.completions.create({
+      ...payload
     });
     
     logger.debug({ 
       reqId, 
+      fullResponse: response,
       rawResponse: response.choices[0].message.content,
       chunkSize: chunk.length
     }, 'Raw OpenAI response');
@@ -104,10 +115,18 @@ export async function analyzeWithOpenAI(text, reqId) {
     const chunks = chunkBOEContent(items);
     logger.debug({ reqId, chunkCount: chunks.length }, 'Split BOE content into chunks');
 
+    // Only process first two chunks for debugging
+    const debugChunks = chunks.slice(0, 2);
+    logger.debug({ 
+      reqId, 
+      firstChunk: debugChunks[0],
+      secondChunk: debugChunks[1]
+    }, 'Debug chunks content');
+
     // Process chunks in batches to limit concurrent requests
     const results = [];
-    for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
-      const batch = chunks.slice(i, i + MAX_CONCURRENT_REQUESTS);
+    for (let i = 0; i < debugChunks.length; i += MAX_CONCURRENT_REQUESTS) {
+      const batch = debugChunks.slice(i, i + MAX_CONCURRENT_REQUESTS);
       const batchResults = await Promise.all(
         batch.map(async (chunk, index) => {
           const batchIndex = i + index;
