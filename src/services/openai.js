@@ -76,7 +76,7 @@ CRITICAL REQUIREMENTS:
           content: `User Query: ${query}\n\nBOE Content: ${JSON.stringify(chunk)}`
         }
       ],
-      max_tokens: 500
+      max_tokens: 500,
       temperature: 0,
       response_format: { type: "json" }
     };
