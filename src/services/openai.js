@@ -8,12 +8,40 @@ let openai;
 
 async function analyzeChunk(chunk, query, reqId) {
   try {
+    // Create the complete payload
     const payload = {
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
           content: "You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications. Return a structured JSON response with matches that include: document_type, issuing_body, title, dates, code, section, department, links, and a relevance score (0-1). Provide a concise summary for each match. Focus on finding the most relevant documents based on the user's query."
+          content: `You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications. 
+
+Return ONLY a valid JSON response with the following structure:
+{
+  "matches": [{
+    "document_type": "string (RESOLUTION, ORDER, ROYAL_DECREE, LAW, ANNOUNCEMENT)",
+    "issuing_body": "string",
+    "title": "string",
+    "dates": {
+      "document_date": "YYYY-MM-DD",
+      "publication_date": "YYYY-MM-DD"
+    },
+    "code": "string",
+    "section": "string",
+    "department": "string",
+    "links": {
+      "pdf": "string",
+      "html": "string"
+    },
+    "relevance_score": "number (0-1)",
+    "summary": "string"
+  }],
+  "metadata": {
+    "match_count": "number",
+    "max_relevance": "number"
+  }
+}`
         },
         {
           role: "user",
@@ -24,9 +52,12 @@ async function analyzeChunk(chunk, query, reqId) {
     };
 
     logger.debug({ 
-      reqId,
-      payload,
-      chunkSize: chunk.length
+      reqId, 
+      query,
+      chunkSize: chunk.length,
+      chunkContent: chunk,
+      systemPrompt: payload.messages[0].content,
+      userPrompt: payload.messages[1].content
     }, 'OpenAI request payload');
 
     const response = await openai.chat.completions.create({
@@ -35,13 +66,20 @@ async function analyzeChunk(chunk, query, reqId) {
     
     logger.debug({ 
       reqId, 
-      fullResponse: response,
-      rawResponse: response.choices[0].message.content,
-      chunkSize: chunk.length
+      responseContent: response.choices[0].message.content,
+      model: response.model,
+      promptTokens: response.usage?.prompt_tokens,
+      completionTokens: response.usage?.completion_tokens,
+      totalTokens: response.usage?.total_tokens
     }, 'Raw OpenAI response');
 
     try {
-      return JSON.parse(response.choices[0].message.content);
+      const parsedResponse = JSON.parse(response.choices[0].message.content);
+      logger.debug({
+        reqId,
+        parsedResponse
+      }, 'Successfully parsed OpenAI response');
+      return parsedResponse;
     } catch (parseError) {
       logger.error({ 
         reqId, 
@@ -92,6 +130,12 @@ function mergeResults(results) {
 
 export async function analyzeWithOpenAI(text, reqId) {
   try {
+    // Log the complete items before chunking
+    logger.debug({ 
+      reqId, 
+      completeItems: JSON.parse(text.match(/BOE Content: (.*)/s)[1])
+    }, 'Complete BOE items before chunking');
+
     if (!openai) {
       logger.debug({ reqId }, 'Initializing OpenAI client');
       const apiKey = process.env.OPENAI_API_KEY;
@@ -119,8 +163,11 @@ export async function analyzeWithOpenAI(text, reqId) {
     const debugChunks = chunks.slice(0, 2);
     logger.debug({ 
       reqId, 
-      firstChunk: debugChunks[0],
-      secondChunk: debugChunks[1]
+      chunks: debugChunks.map((chunk, index) => ({
+        chunkIndex: index,
+        itemCount: chunk.length,
+        items: chunk
+      }))
     }, 'Debug chunks content');
 
     // Process chunks in batches to limit concurrent requests
