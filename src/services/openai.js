@@ -83,7 +83,8 @@ CRITICAL REQUIREMENTS:
 
     logger.debug({ 
       reqId, 
-      payload
+      msg: 'OpenAI request payload',
+      payload: JSON.stringify(payload, null, 2)
     }, 'OpenAI request payload');
 
     const response = await openai.chat.completions.create({
@@ -92,7 +93,8 @@ CRITICAL REQUIREMENTS:
     
     logger.debug({ 
       reqId, 
-      response
+      msg: 'Raw OpenAI response',
+      response: JSON.stringify(response, null, 2)
     }, 'Raw OpenAI response');
     
     // Clean the response content

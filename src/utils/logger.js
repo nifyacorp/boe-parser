@@ -6,14 +6,17 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const loggerConfig = {
   level: LOG_LEVEL,
   messageKey: 'message',
-  formatters: {
-    level: (label) => ({ severity: label.toUpperCase() })
-  },
   serializers: {
     error: pino.stdSerializers.err,
     req: pino.stdSerializers.req,
     res: pino.stdSerializers.res
-  }
+  },
+  formatters: {
+    level: (label) => ({ severity: label.toUpperCase() }),
+    bindings: () => ({})
+  },
+  timestamp: () => `,"time":"${new Date().toISOString()}"`,
+  base: null
 };
 
 // Only use pino-pretty in development
@@ -23,7 +26,10 @@ if (isDevelopment) {
     options: {
       colorize: true,
       translateTime: 'SYS:standard',
-      ignore: 'pid,hostname'
+      ignore: 'pid,hostname',
+      messageFormat: '{msg} {payload}',
+      singleLine: false,
+      levelFirst: true
     }
   };
 }
