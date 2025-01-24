@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { logger } from '../utils/logger.js';
 
 const MAX_CHUNK_SIZE = 25; // Reduced chunk size
-const MAX_CONCURRENT_REQUESTS = 3; // Limit concurrent requests
+const MAX_CONCURRENT_REQUESTS = 2; // Reduce concurrent requests to avoid rate limits
 
 // Define expected response structure for validation
 const responseSchema = {
@@ -34,10 +34,17 @@ let openai;
 
 async function analyzeChunk(chunk, query, reqId) {
   try {
+    // Log the request details
+    logger.debug({ 
+      reqId,
+      chunkSize: chunk.length,
+      queryLength: query.length,
+      firstItem: chunk[0]
+    }, 'Starting chunk analysis');
+
     const payload = {
       model: "gpt-4o-mini",
       temperature: 0,
-      response_format: { type: "json" },
       messages: [
         {
           role: "system",
@@ -79,8 +86,7 @@ CRITICAL REQUIREMENTS:
         }
       ],
       max_tokens: 500,
-      temperature: 0,
-      response_format: { type: "json" }
+      response_format: { type: "json_object" }
     };
 
     logger.debug({ 
@@ -90,20 +96,15 @@ CRITICAL REQUIREMENTS:
     }, 'OpenAI request payload');
 
     const response = await openai.chat.completions.create({
-      ...payload
-    });
+    const response = await openai.chat.completions.create(payload);
     
     logger.debug({ 
-      reqId, 
-      response: {
-        id: response.id,
-        model: response.model,
-        choices: response.choices.map(choice => ({
-          content: choice.message.content,
-          finish_reason: choice.finish_reason
-        })),
-        usage: response.usage
-      }
+      reqId,
+      responseId: response.id,
+      model: response.model,
+      content: response.choices[0].message.content,
+      finishReason: response.choices[0].finish_reason,
+      usage: response.usage
     }, 'Raw OpenAI response');
     
     // Clean the response content
@@ -115,51 +116,82 @@ CRITICAL REQUIREMENTS:
     try {
       const parsedResponse = JSON.parse(cleanContent);
       
-      // Validate response structure
-      if (!parsedResponse.matches || !Array.isArray(parsedResponse.matches) || !parsedResponse.metadata) {
-        throw new Error('Invalid response structure');
+      // Detailed response validation
+      const validationErrors = [];
+      
+      if (!parsedResponse.matches) {
+        validationErrors.push('Missing matches array');
+      } else if (!Array.isArray(parsedResponse.matches)) {
+        validationErrors.push('matches is not an array');
+      }
+      
+      if (!parsedResponse.metadata) {
+        validationErrors.push('Missing metadata object');
+      } else {
+        if (typeof parsedResponse.metadata.match_count !== 'number') {
+          validationErrors.push('Invalid or missing match_count');
+        }
+        if (typeof parsedResponse.metadata.max_relevance !== 'number') {
+          validationErrors.push('Invalid or missing max_relevance');
+        }
+      }
+      
+      if (validationErrors.length > 0) {
+        throw new Error(`Invalid response structure: ${validationErrors.join(', ')}`);
       }
       
       logger.debug({
         reqId,
-        parsedResponse,
         matchCount: parsedResponse.matches.length,
-        maxRelevance: parsedResponse.metadata.max_relevance
+        maxRelevance: parsedResponse.metadata.max_relevance,
+        firstMatch: parsedResponse.matches[0]
       }, 'Successfully parsed OpenAI response');
+
       return parsedResponse;
+
     } catch (parseError) {
       logger.error({ 
         reqId,
-        error: {
-          name: parseError.name,
-          message: parseError.message,
-          stack: parseError.stack
-        },
+        errorType: parseError.name,
+        errorMessage: parseError.message,
+        errorStack: parseError.stack,
         rawResponse: {
           content: response.choices[0].message.content,
-          length: response.choices[0].message.content.length
+          length: response.choices[0].message.content.length,
+          firstChars: response.choices[0].message.content.substring(0, 100)
         }
       }, 'Failed to parse OpenAI response');
       throw parseError;
     }
 
   } catch (error) {
-    logger.error({ 
+    // Detailed error logging based on error type
+    const errorDetails = {
       reqId,
-      error: {
-        name: error.name,
-        message: error.message,
-        code: error.code,
-        type: error.type,
-        stack: error.stack,
-        status: error.status
-      },
+      errorType: error.name,
+      errorMessage: error.message,
+      errorCode: error.code,
+      errorStatus: error.status
+    };
+
+    if (error.response) {
+      errorDetails.openaiError = {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      };
+    }
+
+    logger.error({ 
+      ...errorDetails,
       context: {
         chunkSize: chunk.length,
         queryLength: query.length,
-        modelUsed: "gpt-4o-mini"
+        modelUsed: "gpt-4o-mini",
+        firstItemTitle: chunk[0]?.title || 'No title'
       }
     }, 'Chunk analysis failed');
+
     return { matches: [], metadata: { match_count: 0, max_relevance: 0 } };
   }
 }
@@ -229,24 +261,43 @@ export async function analyzeWithOpenAI(text, reqId) {
     logger.debug({ reqId, chunkCount: chunks.length }, 'Split BOE content into chunks');
 
     // Only process first two chunks for debugging
-    const debugChunks = chunks.slice(0, 2);
+    // Process all chunks in production
+    const chunksToProcess = process.env.NODE_ENV === 'development' ? chunks.slice(0, 2) : chunks;
     logger.debug({ 
       reqId, 
-      debugChunks
-    }, 'Debug chunks content');
+      chunkCount: chunksToProcess.length,
+      totalItems: items.length
+    }, 'Processing chunks');
 
     // Process chunks in batches to limit concurrent requests
     const results = [];
-    for (let i = 0; i < debugChunks.length; i += MAX_CONCURRENT_REQUESTS) {
-      const batch = debugChunks.slice(i, i + MAX_CONCURRENT_REQUESTS);
+    for (let i = 0; i < chunksToProcess.length; i += MAX_CONCURRENT_REQUESTS) {
+      const batch = chunksToProcess.slice(i, i + MAX_CONCURRENT_REQUESTS);
+      
+      // Add delay between batches to avoid rate limits
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
       const batchResults = await Promise.all(
         batch.map(async (chunk, index) => {
           const batchIndex = i + index;
           logger.debug({ reqId, chunkIndex: batchIndex, itemCount: chunk.length }, 'Analyzing chunk');
           try {
-            return await analyzeChunk(chunk, query, reqId);
+            const result = await analyzeChunk(chunk, query, reqId);
+            if (!result || !result.matches) {
+              throw new Error('Invalid response from OpenAI');
+            }
+            return result;
           } catch (error) {
-            logger.error({ reqId, chunkIndex: batchIndex, error: error.message }, 'Chunk analysis failed');
+            logger.error({ 
+              reqId, 
+              chunkIndex: batchIndex, 
+              error: error.message,
+              errorType: error.name,
+              errorStack: error.stack,
+              chunk: chunk.slice(0, 2) // Log first two items for debugging
+            }, 'Chunk analysis failed');
             return { matches: [], metadata: { match_count: 0, max_relevance: 0 } };
           }
         })
