@@ -1,44 +1,64 @@
-import pino from 'pino';
-
 const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
-const isDevelopment = process.env.NODE_ENV === 'development';
 
-const loggerConfig = {
-  level: LOG_LEVEL,
-  messageKey: 'message',
-  transport: {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'SYS:standard',
-      ignore: 'pid,hostname',
-      messageFormat: '{msg} {payload}',
-      singleLine: false,
-      levelFirst: true
-    }
-  },
-  serializers: {
-    error: pino.stdSerializers.err,
-    req: pino.stdSerializers.req,
-    res: pino.stdSerializers.res
-  },
-  formatters: {
-    level: (label) => ({ level: label.toUpperCase() }),
-    bindings: () => ({}),
-    log: (object) => {
-      // Ensure objects are properly stringified
-      const processed = {};
-      for (const [key, value] of Object.entries(object)) {
-        if (typeof value === 'object' && value !== null) {
-          processed[key] = JSON.stringify(value, null, 2);
-        } else {
-          processed[key] = value;
-        }
-      }
-      return processed;
-    }
-  },
-  timestamp: pino.stdTimeFunctions.isoTime
+const LEVELS = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3
 };
 
-export const logger = pino(loggerConfig);
+function formatObject(obj) {
+  if (obj instanceof Error) {
+    return {
+      message: obj.message,
+      name: obj.name,
+      stack: obj.stack,
+      ...obj
+    };
+  }
+  
+  if (typeof obj === 'object' && obj !== null) {
+    return JSON.stringify(obj, null, 2);
+  }
+  
+  return obj;
+}
+
+function formatMessage(level, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  const formattedData = Object.entries(data)
+    .map(([key, value]) => `\n  ${key}: ${formatObject(value)}`)
+    .join('');
+    
+  return `[${timestamp}] ${level.toUpperCase()}: ${message}${formattedData}`;
+}
+
+function shouldLog(level) {
+  return LEVELS[level] <= LEVELS[LOG_LEVEL];
+}
+
+export const logger = {
+  error(data, message) {
+    if (shouldLog('error')) {
+      console.error(formatMessage('error', message, data));
+    }
+  },
+
+  warn(data, message) {
+    if (shouldLog('warn')) {
+      console.warn(formatMessage('warn', message, data));
+    }
+  },
+
+  info(data, message) {
+    if (shouldLog('info')) {
+      console.info(formatMessage('info', message, data));
+    }
+  },
+
+  debug(data, message) {
+    if (shouldLog('debug')) {
+      console.debug(formatMessage('debug', message, data));
+    }
+  }
+};
