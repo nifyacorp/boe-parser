@@ -83,13 +83,7 @@ CRITICAL REQUIREMENTS:
 
     logger.debug({ 
       reqId, 
-      payload: {
-        model: payload.model,
-        messages: payload.messages,
-        max_tokens: payload.max_tokens,
-        temperature: payload.temperature,
-        response_format: payload.response_format
-      }
+      payload
     }, 'OpenAI request payload');
 
     const response = await openai.chat.completions.create({
@@ -98,13 +92,7 @@ CRITICAL REQUIREMENTS:
     
     logger.debug({ 
       reqId, 
-      response: {
-        id: response.id,
-        model: response.model,
-        choices: response.choices,
-        usage: response.usage,
-        created: response.created
-      }
+      response
     }, 'Raw OpenAI response');
     
     // Clean the response content
@@ -211,11 +199,7 @@ export async function analyzeWithOpenAI(text, reqId) {
     const debugChunks = chunks.slice(0, 2);
     logger.debug({ 
       reqId, 
-      chunks: debugChunks.map((chunk, index) => ({
-        chunkIndex: index,
-        itemCount: chunk.length,
-        items: chunk
-      }))
+      debugChunks
     }, 'Debug chunks content');
 
     // Process chunks in batches to limit concurrent requests
