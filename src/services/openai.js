@@ -1,27 +1,49 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger.js';
 
-const MAX_CHUNK_SIZE = 50; // Maximum number of BOE items per chunk
+const MAX_CHUNK_SIZE = 25; // Reduced chunk size
+const MAX_CONCURRENT_REQUESTS = 3; // Limit concurrent requests
 
 let openai;
 
 async function analyzeChunk(chunk, query, reqId) {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: "You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications. Return a structured JSON response with matches that include: document_type, issuing_body, title, dates, code, section, department, links, and a relevance score (0-1). Provide a concise summary for each match. Focus on finding the most relevant documents based on the user's query."
-      },
-      {
-        role: "user",
-        content: `User Query: ${query}\n\nBOE Content: ${JSON.stringify(chunk)}`
-      }
-    ],
-    max_tokens: 500
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are a BOE (Boletín Oficial del Estado) analysis assistant. Analyze the provided BOE items and extract key information about announcements, resolutions, and other official communications. Return a structured JSON response with matches that include: document_type, issuing_body, title, dates, code, section, department, links, and a relevance score (0-1). Provide a concise summary for each match. Focus on finding the most relevant documents based on the user's query."
+        },
+        {
+          role: "user",
+          content: `User Query: ${query}\n\nBOE Content: ${JSON.stringify(chunk)}`
+        }
+      ],
+      max_tokens: 500
+    });
+    
+    logger.debug({ 
+      reqId, 
+      rawResponse: response.choices[0].message.content,
+      chunkSize: chunk.length
+    }, 'Raw OpenAI response');
 
-  return JSON.parse(response.choices[0].message.content);
+    try {
+      return JSON.parse(response.choices[0].message.content);
+    } catch (parseError) {
+      logger.error({ 
+        reqId, 
+        error: parseError.message,
+        rawResponse: response.choices[0].message.content 
+      }, 'Failed to parse OpenAI response');
+      throw parseError;
+    }
+
+  } catch (error) {
+    logger.error({ reqId, error: error.message }, 'Chunk analysis failed');
+    return { matches: [], metadata: { match_count: 0, max_relevance: 0 } };
+  }
 }
 
 function chunkBOEContent(items) {
@@ -56,6 +78,7 @@ function mergeResults(results) {
     }
   };
 }
+
 export async function analyzeWithOpenAI(text, reqId) {
   try {
     if (!openai) {
@@ -81,16 +104,27 @@ export async function analyzeWithOpenAI(text, reqId) {
     const chunks = chunkBOEContent(items);
     logger.debug({ reqId, chunkCount: chunks.length }, 'Split BOE content into chunks');
 
-    // Analyze each chunk
-    const chunkResults = await Promise.all(
-      chunks.map(async (chunk, index) => {
-        logger.debug({ reqId, chunkIndex: index, itemCount: chunk.length }, 'Analyzing chunk');
-        return analyzeChunk(chunk, query, reqId);
-      })
-    );
+    // Process chunks in batches to limit concurrent requests
+    const results = [];
+    for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
+      const batch = chunks.slice(i, i + MAX_CONCURRENT_REQUESTS);
+      const batchResults = await Promise.all(
+        batch.map(async (chunk, index) => {
+          const batchIndex = i + index;
+          logger.debug({ reqId, chunkIndex: batchIndex, itemCount: chunk.length }, 'Analyzing chunk');
+          try {
+            return await analyzeChunk(chunk, query, reqId);
+          } catch (error) {
+            logger.error({ reqId, chunkIndex: batchIndex, error: error.message }, 'Chunk analysis failed');
+            return { matches: [], metadata: { match_count: 0, max_relevance: 0 } };
+          }
+        })
+      );
+      results.push(...batchResults);
+    }
 
     // Merge results from all chunks
-    const mergedResults = mergeResults(chunkResults);
+    const mergedResults = mergeResults(results);
     logger.debug({ reqId, totalMatches: mergedResults.matches.length }, 'Merged chunk results');
 
     return mergedResults;
