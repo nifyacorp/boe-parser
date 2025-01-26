@@ -95,7 +95,6 @@ CRITICAL REQUIREMENTS:
       payload: JSON.stringify(payload, null, 2)
     }, 'OpenAI request payload');
 
-    const response = await openai.chat.completions.create({
     const response = await openai.chat.completions.create(payload);
     
     logger.debug({ 
