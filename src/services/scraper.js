@@ -86,10 +86,10 @@ function determineDocumentType(title) {
   return 'OTHER';
 }
 
-export async function scrapeWebsite(url, reqId) {
+export async function scrapeWebsite(reqId) {
   try {
     // Override the input URL with BOE XML API URL
-    url = getYesterdayBOEUrl();
+    const url = getYesterdayBOEUrl();
     
     logger.debug({ reqId, url }, 'Starting BOE XML fetch');
     const response = await axios.get(url);
