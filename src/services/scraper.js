@@ -1,7 +1,9 @@
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
 import { formatDate } from '../utils/dateFormatter.js';
-import { JSDOM } from 'jsdom';
+import { XMLParser } from 'fast-xml-parser';
+
+const parser = new XMLParser({ ignoreAttributes: false });
 
 function getYesterdayBOEUrl() {
   const today = new Date();
@@ -12,69 +14,61 @@ function getYesterdayBOEUrl() {
   const month = String(yesterday.getMonth() + 1).padStart(2, '0');
   const day = String(yesterday.getDate()).padStart(2, '0');
   
-  return `https://www.boe.es/boe/dias/${year}/${month}/${day}/`;
+  return `https://www.boe.es/datosabiertos/api/boe/sumario/${year}${month}${day}`;
 }
 
-function extractBOEInfo(dom) {
-  const titleElement = dom.window.document.querySelector('.tituloSumario h2');
-  if (!titleElement) return null;
+function extractBOEInfo(xmlData) {
+  if (!xmlData || !xmlData.response || !xmlData.response.data || !xmlData.response.data.sumario || !xmlData.response.data.sumario.metadatos) {
+    return null;
+  }
 
-  const titleText = titleElement.textContent;
-  const dateMatch = titleText.match(/(\d+)\s+de\s+(\w+)\s+de\s+(\d{4})/);
-  const numMatch = titleText.match(/Núm\.\s*(\d+)/);
-
+  const metadatos = xmlData.response.data.sumario.metadatos;
   return {
-    issue_number: numMatch ? numMatch[1] : '',
-    publication_date: dateMatch ? `${dateMatch[3]}-${getMonthNumber(dateMatch[2])}-${dateMatch[1].padStart(2, '0')}` : '',
+    issue_number: xmlData.response.data.sumario.diario?.["@_numero"] || '',
+    publication_date: formatDate(metadatos.fecha_publicacion),
     source_url: 'https://www.boe.es'
   };
 }
 
-function extractBOEItems(dom) {
-  const items = [];
-  const sections = dom.window.document.querySelectorAll('.sumario h3');
-
-  sections.forEach(section => {
-    const sectionTitle = section.textContent.trim();
-    const sectionContent = section.parentElement;
-    
-    if (!sectionContent) return;
-
-    const dispositions = sectionContent.querySelectorAll('.dispo');
-    dispositions.forEach(dispo => {
-      const title = dispo.querySelector('p')?.textContent.trim() || '';
-      const pdfLink = dispo.querySelector('.puntoPDF a');
-      const htmlLink = dispo.querySelector('.puntoHTML a');
-
-      const pdfUrl = pdfLink?.href || '';
-      const pdfCode = pdfUrl.match(/BOE-[A-Z]-\d{4}-\d+/)?.[0] || '';
-
-      items.push({
-        title,
-        section: sectionTitle,
-        department: findDepartment(dispo),
-        links: {
-          pdf: pdfUrl,
-          html: htmlLink?.href || ''
-        },
-        code: pdfCode,
-        type: determineDocumentType(title)
-      });
-    });
-  });
-
-  return items;
-}
-
-function findDepartment(element) {
-  let current = element;
-  while (current) {
-    if (current.tagName === 'H4') {
-      return current.textContent.trim();
-    }
-    current = current.previousElementSibling;
+function extractBOEItems(xmlData) {
+  if (!xmlData || !xmlData.response || !xmlData.response.data || !xmlData.response.data.sumario || !xmlData.response.data.sumario.diario) {
+    return [];
   }
-  return '';
+
+  const sections = xmlData.response.data.sumario.diario.seccion;
+  if (!Array.isArray(sections)) {
+    return [];
+  }
+
+  const items = [];
+  sections.forEach(section => {
+    const department = section.departamento;
+    if (Array.isArray(department)) {
+      department.forEach(dep => {
+        const epigrafe = dep.epigrafe;
+        if (Array.isArray(epigrafe)) {
+          epigrafe.forEach(epi => {
+            if (Array.isArray(epi.item)) {
+              epi.item.forEach(item => {
+                items.push({
+                  title: item.titulo,
+                  section: section["@_nombre"],
+                  department: dep["@_nombre"],
+                  links: {
+                    pdf: item.url_pdf,
+                    html: item.url_html
+                  },
+                  code: item.identificador,
+                  type: determineDocumentType(item.titulo)
+                });
+              });
+            }
+          });
+        }
+      });
+    }
+  });
+  return items;
 }
 
 function determineDocumentType(title) {
@@ -92,42 +86,24 @@ function determineDocumentType(title) {
   return 'OTHER';
 }
 
-function getMonthNumber(spanishMonth) {
-  const months = {
-    'enero': '01',
-    'febrero': '02',
-    'marzo': '03',
-    'abril': '04',
-    'mayo': '05',
-    'junio': '06',
-    'julio': '07',
-    'agosto': '08',
-    'septiembre': '09',
-    'octubre': '10',
-    'noviembre': '11',
-    'diciembre': '12'
-  };
-  return months[spanishMonth.toLowerCase()] || '01';
-}
-
 export async function scrapeWebsite(url, reqId) {
   try {
-    // Override the input URL with BOE URL
+    // Override the input URL with BOE XML API URL
     url = getYesterdayBOEUrl();
     
-    logger.debug({ reqId, url }, 'Starting BOE fetch');
+    logger.debug({ reqId, url }, 'Starting BOE XML fetch');
     const response = await axios.get(url);
-    logger.debug({ reqId, status: response.status }, 'BOE fetch completed');
+    logger.debug({ reqId, status: response.status }, 'BOE XML fetch completed');
 
-    const dom = new JSDOM(response.data);
+    const xmlData = parser.parse(response.data);
     
-    const boeInfo = extractBOEInfo(dom);
-    if (!boeInfo) {
-      throw new Error('Failed to extract BOE information');
+    const boeInfo = extractBOEInfo(xmlData);
+     if (!boeInfo) {
+      throw new Error('Failed to extract BOE information from XML');
     }
 
-    const items = extractBOEItems(dom);
-    logger.debug({ reqId, itemCount: items.length }, 'BOE items extracted');
+    const items = extractBOEItems(xmlData);
+    logger.debug({ reqId, itemCount: items.length }, 'BOE items extracted from XML');
 
     return {
       items,
@@ -140,7 +116,7 @@ export async function scrapeWebsite(url, reqId) {
       stack: error.stack,
       url,
       code: error.code 
-    }, 'Error scraping BOE website');
-    throw new Error(`Failed to scrape BOE website: ${error.message}`);
+    }, 'Error scraping BOE XML');
+    throw new Error(`Failed to scrape BOE XML: ${error.message}`);
   }
 }
