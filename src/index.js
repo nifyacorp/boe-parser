@@ -5,6 +5,7 @@ import { scrapeWebsite } from './services/scraper.js';
 import { processText } from './services/textProcessor.js';
 import { analyzeWithOpenAI } from './services/openai.js';
 import { randomUUID } from 'crypto';
+import { validateApiKey } from './utils/auth.js';
 import { getApiDocs } from './utils/apiDocs.js';
 
 const app = express();
@@ -30,6 +31,14 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+// Apply API key validation to all routes except /help
+app.use(async (req, res, next) => {
+  if (req.path === '/help') {
+    return next();
+  }
+  await validateApiKey(req, res, next);
+});
 
 app.get('/help', (req, res) => {
   const docs = getApiDocs();
