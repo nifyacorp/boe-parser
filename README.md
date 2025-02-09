@@ -1,64 +1,67 @@
-# BOE Analysis Service
+# BOE Analysis Service 🔍
 
-A Node.js microservice that analyzes content from the Boletín Oficial del Estado (BOE) using OpenAI's GPT-4. The service processes user queries against the latest BOE publications to extract relevant information and insights.
+A Node.js microservice that analyzes content from the Boletín Oficial del Estado (BOE) using AI. This service processes natural language queries against the latest BOE publications to extract relevant information and insights.
 
 ## Features
 
-- Automatic daily BOE content fetching
-- Natural language query processing
-- AI-powered content analysis using GPT-4
-- Structured JSON responses with detailed metadata
-- Cloud-native design for Google Cloud Run
-- Comprehensive logging with Pino
-- Interactive API documentation via /help endpoint
+- 🔄 Automatic daily BOE content fetching and parsing
+- 🤖 AI-powered content analysis for natural language queries
+- 📊 Structured JSON responses with relevance scoring
+- 🔐 Secure API key authentication via Google Cloud Secret Manager
+- 📝 Comprehensive logging system
+- 📚 Interactive API documentation
+- ☁️ Cloud-native design for Google Cloud Run
 
 ## Architecture
 
 The service follows a modular architecture with clear separation of concerns:
 
-```
+### Directory Structure
+
+```plaintext
 src/
-├── index.js           # Main application entry point
-├── services/         
-│   ├── scraper.js     # BOE HTML scraping functionality
-│   ├── textProcessor.js # Text processing and cleaning
-│   └── openai.js      # OpenAI integration
+├── index.js              # Application entry point
+├── services/
+│   ├── scraper.js        # BOE content fetching and parsing
+│   ├── textProcessor.js  # Query preprocessing
+│   └── openai.js        # AI analysis integration
 └── utils/
-    ├── logger.js      # Logging utility
-    ├── secrets.js     # Secret management
-    └── apiDocs.js     # API documentation
+    ├── auth.js          # API key validation
+    ├── logger.js        # Structured logging
+    ├── secrets.js       # Secret management
+    └── apiDocs.js       # API documentation
 ```
 
 ### Key Components
 
-- **Express Server**: Handles HTTP requests and routing
-- **BOE Scraper**: Fetches and parses BOE HTML content
-- **Text Processor**: Cleans and normalizes input text
-- **OpenAI Analyzer**: Processes content using GPT-4
-- **Secret Manager**: Securely handles API keys and credentials
-- **Logger**: Structured logging for Cloud Run
-- **API Documentation**: Interactive endpoint documentation
+- **Express Server**: REST API endpoints and request handling
+- **BOE Scraper**: Intelligent parsing of BOE publications
+- **Text Processor**: Query optimization and normalization
+- **AI Analyzer**: Advanced content analysis
+- **Auth System**: Secure API key validation
+- **Logger**: Structured logging with detailed context
+- **Secret Manager**: Secure credential management
 
 ## Prerequisites
 
-- Node.js 18 or higher
-- Google Cloud Project with Secret Manager enabled
-- OpenAI API key
-- Docker (for containerization)
+- Node.js 18+
+- Google Cloud Project
+- Docker
+- Access to BOE Analysis Service API key
 
 ## Environment Variables
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| PORT | Server port | No | 8080 |
-| GOOGLE_CLOUD_PROJECT | Google Cloud project ID | Yes | - |
-| OPENAI_API_KEY | OpenAI API key (can be provided directly or stored in Secret Manager) | Yes | - |
+| PORT | Server port number | No | 8080 |
+| GOOGLE_CLOUD_PROJECT | GCP project ID | Yes | - |
+| LOG_LEVEL | Logging level (debug, info, warn, error) | No | debug |
 
 ## Setup
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone [repository-url]
    cd boe-analysis-service
    ```
 
@@ -67,14 +70,8 @@ src/
    npm install
    ```
 
-3. Configure the OpenAI API key (choose one method):
-   
-   **Option 1: Environment Variable**
-   - Set the OPENAI_API_KEY environment variable directly
-   
-   **Option 2: Google Cloud Secret Manager**
-   - Create a secret named `OPENAI_API_KEY`
-   - Store your OpenAI API key in the secret
+3. Configure Google Cloud Secret Manager:
+   - Set up `PARSER_API_KEY` secret for API authentication
 
 4. Build the Docker image:
    ```bash
@@ -85,7 +82,7 @@ src/
 
 ### Google Cloud Run
 
-1. Push the image to Google Container Registry:
+1. Push the image to Container Registry:
    ```bash
    gcloud builds submit --tag gcr.io/PROJECT_ID/boe-analysis-service
    ```
@@ -102,28 +99,32 @@ src/
 
 ## API Usage
 
-### Documentation Endpoint
+### Authentication
 
-Get API documentation and examples:
+All requests require an API key in the Authorization header:
 
-```bash
+```http
+Authorization: Bearer YOUR_API_KEY
+```
+
+### Endpoints
+
+#### 1. Get API Documentation
+```http
 GET /help
 ```
 
-Returns comprehensive API documentation including:
-- Available endpoints
-- Request/response structures
-- Example payloads
-- Error formats
+Returns comprehensive API documentation.
 
-### Analyze Text Endpoint
+#### 2. Analyze BOE Content
+```http
+POST /analyze-text
+Content-Type: application/json
+```
 
-`POST /analyze-text`
+Analyze multiple queries against latest BOE content.
 
-Analyzes multiple text queries against the latest BOE content in parallel, returning structured results.
-
-#### Request Body
-
+Request body:
 ```json
 {
   "texts": [
@@ -134,9 +135,7 @@ Analyzes multiple text queries against the latest BOE content in parallel, retur
 }
 ```
 
-#### Response
-
-The endpoint returns a structured JSON response with the following format:
+Response format:
 
 ```json
 {
@@ -178,100 +177,48 @@ The endpoint returns a structured JSON response with the following format:
 }
 ```
 
-#### Response Fields
+## Rate Limits
 
-- `query_date`: Date when the query was processed
-- `boe_info`: Information about the BOE issue being analyzed
-  - `issue_number`: BOE issue number
-  - `publication_date`: Publication date
-  - `source_url`: URL of the BOE website
-- `results`: Array of analysis results for each prompt
-  - `prompt`: Original search query
-  - `matches`: Array of matching documents
-    - `document_type`: Type of document (RESOLUTION, ORDER, ROYAL_DECREE, LAW, ANNOUNCEMENT)
-    - `issuing_body`: Organization that issued the document
-    - `title`: Complete document title
-    - `dates`: Document dates
-    - `code`: BOE document code
-    - `section`: Main document section
-    - `department`: Government department
-    - `links`: Document URLs (PDF and HTML versions)
-    - `relevance_score`: Match relevance (0-1)
-    - `summary`: Brief content summary
-  - `metadata`: Match-specific metadata
-    - `match_count`: Number of matches found
-    - `max_relevance`: Highest relevance score
-- `metadata`: Query execution metadata
-  - `total_items_processed`: Number of BOE items analyzed
-  - `processing_time_ms`: Total processing time in milliseconds
+- 100 requests per minute per API key
+- Maximum 5 queries per request
+- Maximum query length: 500 characters
 
-#### Error Response
+## Error Handling
 
+The service uses standard HTTP status codes:
+
+- `200`: Success
+- `400`: Bad Request
+- `401`: Unauthorized
+- `429`: Too Many Requests
+- `500`: Internal Server Error
+
+Error response format:
 ```json
 {
-  "error": "Array of text prompts is required"
+  "error": "Descriptive error message"
 }
 ```
 
-#### Features
-
-- Multiple prompts in a single request
-- Parallel processing for better performance
-- Structured JSON responses with detailed metadata
-- Relevance scoring for matches
-- Document categorization and summarization
-- Processing time tracking
-- Comprehensive error handling
-
 ## Development
 
-1. Start the development server:
-   ```bash
-   npm run dev
-   ```
+```bash
+# Start development server
+npm run dev
 
-2. Run tests:
-   ```bash
-   npm test
-   ```
+# Run tests
+npm test
 
-3. Lint code:
-   ```bash
-   npm run lint
-   ```
-
-## Docker Support
-
-The service includes a Dockerfile for containerization:
-
-```dockerfile
-FROM node:18-slim
-WORKDIR /app
-COPY package*.json ./
-RUN npm install --production
-COPY . .
-ENV PORT=8080
-CMD [ "npm", "start" ]
+# Lint code
+npm run lint
 ```
-
-## Logging
-
-The service uses Pino for structured logging, optimized for Cloud Run:
-
-- Log levels: INFO, ERROR
-- JSON format
-- Request tracing
-- Error stack traces
-- Performance metrics
 
 ## Security
 
-- Uses Google Cloud Secret Manager for sensitive data
-- Environment variable configuration
-- Input validation and sanitization
-- Error handling and logging
-- Container security best practices
+- API key authentication
+- Secure secret management
+- Input validation
+- Rate limiting
+- Error logging
 
 ## License
-
-[Add your license information here]

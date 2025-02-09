@@ -4,6 +4,7 @@ import { logger } from './utils/logger.js';
 import { scrapeWebsite } from './services/scraper.js';
 import { processText } from './services/textProcessor.js';
 import { analyzeWithOpenAI } from './services/openai.js';
+import { publishResults } from './utils/pubsub.js';
 import { randomUUID } from 'crypto';
 import { validateApiKey } from './utils/auth.js';
 import { getApiDocs } from './utils/apiDocs.js';
@@ -58,7 +59,6 @@ app.post('/analyze-text', async (req, res) => {
     // Step 1: Fetch and parse BOE content (do this once for all prompts)
     logger.debug({ reqId }, 'Fetching BOE content');
     const boeContent = await scrapeWebsite();
-    logger.debug({ reqId, itemCount: boeContent.items.length }, 'BOE content fetched');
 
     const startTime = Date.now();
 
@@ -88,9 +88,8 @@ app.post('/analyze-text', async (req, res) => {
     }));
 
     const processingTime = Date.now() - startTime;
-
-    logger.debug({ reqId, resultCount: results.length }, 'All analyses completed successfully');
-    res.json({
+    
+    const response = {
       query_date: new Date().toISOString().split('T')[0],
       boe_info: boeContent.boeInfo,
       results,
@@ -98,7 +97,18 @@ app.post('/analyze-text', async (req, res) => {
         total_items_processed: boeContent.items.length,
         processing_time_ms: processingTime
       }
+    };
+
+    // Publish results to PubSub
+    await publishResults({
+      texts,
+      results: response,
+      processingTime
     });
+
+    logger.debug({ reqId, resultCount: results.length }, 'Analysis completed and published to PubSub');
+    res.json(response);
+
   } catch (error) {
     logger.error({ 
       reqId,
@@ -106,6 +116,27 @@ app.post('/analyze-text', async (req, res) => {
       stack: error.stack,
       code: error.code
     }, 'Error processing text request');
+
+    // Publish error to PubSub
+    try {
+      await publishResults({
+        texts: req.body.texts,
+        results: {
+          query_date: new Date().toISOString().split('T')[0],
+          boe_info: null,
+          results: []
+        },
+        processingTime: Date.now() - startTime,
+        error
+      });
+    } catch (pubsubError) {
+      logger.error({
+        reqId,
+        error: pubsubError.message,
+        originalError: error.message
+      }, 'Failed to publish error to PubSub');
+    }
+
     res.status(500).json({ error: error.message });
   }
 });
