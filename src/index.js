@@ -9,29 +9,32 @@ import { randomUUID } from 'crypto';
 import { validateApiKey } from './utils/auth.js';
 import { getApiDocs } from './utils/apiDocs.js';
 
+// Load environment variables
+dotenv.config();
+
 const app = express();
 const port = parseInt(process.env.PORT) || 8080;
-// Remove the DOGA URL since we're now using BOE URL generated in scraper
 
-// Add request ID middleware
+// Middleware to parse JSON bodies
+app.use(express.json());
+
+// Request ID middleware
 app.use((req, res, next) => {
   req.id = randomUUID();
   next();
 });
 
-// Add request logging middleware
+// Request logging middleware
 app.use((req, res, next) => {
   logger.debug({ 
     reqId: req.id,
     method: req.method,
     url: req.url,
     headers: req.headers,
-    body: req.body 
+    body: req.body || {} 
   }, 'Incoming request');
   next();
 });
-
-app.use(express.json());
 
 // Apply API key validation to all routes except /help
 app.use(async (req, res, next) => {
@@ -41,6 +44,13 @@ app.use(async (req, res, next) => {
   await validateApiKey(req, res, next);
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  logger.error({ reqId: req.id, error: err.message, stack: err.stack }, 'Unhandled error');
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Routes
 app.get('/help', (req, res) => {
   const docs = getApiDocs();
   res.json(docs);
@@ -50,8 +60,8 @@ app.post('/analyze-text', async (req, res) => {
   const reqId = req.id;
   try {
     const { texts } = req.body;
-
-    if (!texts || !Array.isArray(texts) || texts.length === 0) {
+    
+    if (!texts || !Array.isArray(texts)) {
       logger.debug({ reqId }, 'Missing or invalid texts array in request body');
       return res.status(400).json({ error: 'Array of text prompts is required' });
     }
@@ -59,6 +69,11 @@ app.post('/analyze-text', async (req, res) => {
     // Step 1: Fetch and parse BOE content (do this once for all prompts)
     logger.debug({ reqId }, 'Fetching BOE content');
     const boeContent = await scrapeWebsite();
+    
+    if (!boeContent || !boeContent.items) {
+      logger.error({ reqId }, 'Failed to fetch BOE content');
+      return res.status(500).json({ error: 'Failed to fetch BOE content' });
+    }
 
     const startTime = Date.now();
 
@@ -110,7 +125,7 @@ app.post('/analyze-text', async (req, res) => {
     res.json(response);
 
   } catch (error) {
-    logger.error({ 
+    logger.error({
       reqId,
       error: error.message,
       stack: error.stack,
