@@ -34,7 +34,7 @@ async function initializePubSub() {
   }
 }
 
-export async function publishResults({ texts, results, processingTime, error = null }) {
+export async function publishResults({ texts, context, results, processingTime, error = null }) {
   try {
     // Initialize PubSub configuration if not already done
     if (!mainTopicName) {
@@ -48,9 +48,9 @@ export async function publishResults({ texts, results, processingTime, error = n
       trace_id: randomUUID(),
       
       request: {
-        subscription_id: randomUUID(),
+        subscription_id: context.subscription_id,
         processing_id: randomUUID(),
-        user_id: randomUUID(), // In production, this should come from authenticated user
+        user_id: context.user_id,
         prompts: texts
       },
 

@@ -59,11 +59,16 @@ app.get('/help', (req, res) => {
 app.post('/analyze-text', async (req, res) => {
   const reqId = req.id;
   try {
-    const { texts } = req.body;
+    const { texts, context } = req.body;
     
     if (!texts || !Array.isArray(texts)) {
       logger.debug({ reqId }, 'Missing or invalid texts array in request body');
       return res.status(400).json({ error: 'Array of text prompts is required' });
+    }
+
+    if (!context || !context.user_id || !context.subscription_id) {
+      logger.debug({ reqId }, 'Missing or invalid context in request body');
+      return res.status(400).json({ error: 'Context with user_id and subscription_id is required' });
     }
 
     // Step 1: Fetch and parse BOE content (do this once for all prompts)
@@ -117,6 +122,7 @@ app.post('/analyze-text', async (req, res) => {
     // Publish results to PubSub
     await publishResults({
       texts,
+      context,
       results: response,
       processingTime
     });
@@ -136,6 +142,7 @@ app.post('/analyze-text', async (req, res) => {
     try {
       await publishResults({
         texts: req.body.texts,
+        context: req.body.context,
         results: {
           query_date: new Date().toISOString().split('T')[0],
           boe_info: null,
