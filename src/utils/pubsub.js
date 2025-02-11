@@ -1,46 +1,41 @@
 import { PubSub } from '@google-cloud/pubsub';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
-import { getSecret } from './secrets.js';
 
 const pubsub = new PubSub();
 
-let mainTopicName = null;
-let mainSubscriptionName = null;
-let dlqTopicName = null;
-let dlqSubscriptionName = null;
+// PubSub configuration from environment variables
+const mainTopicName = process.env.PUBSUB_TOPIC_NAME || 'boe-analysis-notifications';
+const mainSubscriptionName = process.env.PUBSUB_SUBSCRIPTION_NAME || 'boe-analysis-notifications-sub';
+const dlqTopicName = process.env.PUBSUB_DLQ_TOPIC_NAME || 'boe-analysis-notifications-dlq';
+const dlqSubscriptionName = process.env.PUBSUB_DLQ_SUBSCRIPTION_NAME || 'boe-analysis-notifications-dlq-sub';
 
-async function initializePubSub() {
-  try {
-    [mainTopicName, mainSubscriptionName, dlqTopicName, dlqSubscriptionName] = await Promise.all([
-      getSecret('PUBSUB_TOPIC_NAME'),
-      getSecret('PUBSUB_SUBSCRIPTION_NAME'),
-      getSecret('PUBSUB_DLQ_TOPIC_NAME'),
-      getSecret('PUBSUB_DLQ_SUBSCRIPTION_NAME')
-    ]);
+// Log PubSub configuration on startup
+logger.info({
+  mainTopic: mainTopicName,
+  mainSubscription: mainSubscriptionName,
+  dlqTopic: dlqTopicName,
+  dlqSubscription: dlqSubscriptionName
+}, 'PubSub configuration initialized');
 
-    logger.info({
-      mainTopic: mainTopicName,
-      mainSubscription: mainSubscriptionName,
-      dlqTopic: dlqTopicName,
-      dlqSubscription: dlqSubscriptionName
-    }, 'PubSub configuration initialized');
-  } catch (error) {
-    logger.error({
-      error: error.message,
-      stack: error.stack
-    }, 'Failed to initialize PubSub configuration');
-    throw error;
+// Validate PubSub configuration
+function validatePubSubConfig() {
+  const missing = [];
+  if (!process.env.PUBSUB_TOPIC_NAME) missing.push('PUBSUB_TOPIC_NAME');
+  if (!process.env.PUBSUB_SUBSCRIPTION_NAME) missing.push('PUBSUB_SUBSCRIPTION_NAME');
+  if (!process.env.PUBSUB_DLQ_TOPIC_NAME) missing.push('PUBSUB_DLQ_TOPIC_NAME');
+  if (!process.env.PUBSUB_DLQ_SUBSCRIPTION_NAME) missing.push('PUBSUB_DLQ_SUBSCRIPTION_NAME');
+  
+  if (missing.length > 0) {
+    logger.warn({ missing }, 'Using default PubSub configuration. Missing environment variables');
   }
 }
 
+// Validate configuration on startup
+validatePubSubConfig();
+
 export async function publishResults({ texts, context, results, processingTime, error = null }) {
   try {
-    // Initialize PubSub configuration if not already done
-    if (!mainTopicName) {
-      await initializePubSub();
-    }
-
     const message = {
       version: "1.0",
       processor_type: "boe",
