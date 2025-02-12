@@ -1,72 +1,72 @@
 import { PubSub } from '@google-cloud/pubsub';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
-import { getSecret } from './secrets.js';
 
 const pubsub = new PubSub();
 
-let mainTopicName = null;
-let mainSubscriptionName = null;
-let dlqTopicName = null;
-let dlqSubscriptionName = null;
+// PubSub configuration from environment variables
+const mainTopicName = process.env.PUBSUB_TOPIC_NAME || 'boe-analysis-notifications';
+const mainSubscriptionName = process.env.PUBSUB_SUBSCRIPTION_NAME || 'boe-analysis-notifications-sub';
+const dlqTopicName = process.env.PUBSUB_DLQ_TOPIC_NAME || 'boe-analysis-notifications-dlq';
+const dlqSubscriptionName = process.env.PUBSUB_DLQ_SUBSCRIPTION_NAME || 'boe-analysis-notifications-dlq-sub';
 
-async function initializePubSub() {
-  try {
-    [mainTopicName, mainSubscriptionName, dlqTopicName, dlqSubscriptionName] = await Promise.all([
-      getSecret('PUBSUB_TOPIC_NAME'),
-      getSecret('PUBSUB_SUBSCRIPTION_NAME'),
-      getSecret('PUBSUB_DLQ_TOPIC_NAME'),
-      getSecret('PUBSUB_DLQ_SUBSCRIPTION_NAME')
-    ]);
+// Log PubSub configuration on startup
+logger.info({
+  mainTopic: mainTopicName,
+  mainSubscription: mainSubscriptionName,
+  dlqTopic: dlqTopicName,
+  dlqSubscription: dlqSubscriptionName
+}, 'PubSub configuration initialized');
 
-    logger.info({
-      mainTopic: mainTopicName,
-      mainSubscription: mainSubscriptionName,
-      dlqTopic: dlqTopicName,
-      dlqSubscription: dlqSubscriptionName
-    }, 'PubSub configuration initialized');
-  } catch (error) {
-    logger.error({
-      error: error.message,
-      stack: error.stack
-    }, 'Failed to initialize PubSub configuration');
-    throw error;
+// Validate PubSub configuration
+function validatePubSubConfig() {
+  const missing = [];
+  if (!process.env.PUBSUB_TOPIC_NAME) missing.push('PUBSUB_TOPIC_NAME');
+  if (!process.env.PUBSUB_SUBSCRIPTION_NAME) missing.push('PUBSUB_SUBSCRIPTION_NAME');
+  if (!process.env.PUBSUB_DLQ_TOPIC_NAME) missing.push('PUBSUB_DLQ_TOPIC_NAME');
+  if (!process.env.PUBSUB_DLQ_SUBSCRIPTION_NAME) missing.push('PUBSUB_DLQ_SUBSCRIPTION_NAME');
+  
+  if (missing.length > 0) {
+    logger.warn({ missing }, 'Using default PubSub configuration. Missing environment variables');
   }
 }
 
-export async function publishResults({ texts, results, processingTime, error = null }) {
-  try {
-    // Initialize PubSub configuration if not already done
-    if (!mainTopicName) {
-      await initializePubSub();
-    }
+// Validate configuration on startup
+validatePubSubConfig();
 
+export async function publishResults({ texts, context, results, processingTime, error = null }) {
+  try {
     const message = {
-      version: "1.0",
-      processor_type: "boe",
+      version: '1.0',
+      processor_type: 'boe',
       timestamp: new Date().toISOString(),
       trace_id: randomUUID(),
-      
       request: {
-        subscription_id: randomUUID(),
+        subscription_id: context.subscription_id,
         processing_id: randomUUID(),
-        user_id: randomUUID(), // In production, this should come from authenticated user
+        user_id: context.user_id,
         prompts: texts
       },
-
       results: {
         query_date: results.query_date,
-        boe_info: results.boe_info,
         matches: results.results.map(result => ({
           prompt: result.prompt,
-          documents: result.matches
+          documents: result.matches.map(match => ({
+            document_type: 'boe_document',
+            title: match.title,
+            summary: match.summary,
+            relevance_score: match.relevance_score,
+            links: {
+              html: match.links.html,
+              pdf: match.links.pdf
+            }
+          }))
         }))
       },
-
       metadata: {
         processing_time_ms: processingTime,
         total_matches: results.results.reduce((acc, r) => acc + r.matches.length, 0),
-        status: error ? "error" : "success",
+        status: error ? 'error' : 'success',
         error: error ? {
           message: error.message,
           code: error.code || 'UNKNOWN_ERROR',
