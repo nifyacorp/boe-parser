@@ -26,9 +26,13 @@ function formatObject(obj) {
 
 function formatMessage(level, message, data = {}) {
   const timestamp = new Date().toISOString();
-  const formattedData = Object.entries(data)
-    .map(([key, value]) => `\n  ${key}: ${formatObject(value)}`)
-    .join('');
+  let formattedData = '';
+  
+  if (Object.keys(data).length > 0) {
+    formattedData = '\n' + Object.entries(data)
+      .map(([key, value]) => `  ${key}: ${formatObject(value)}`)
+      .join('\n');
+  }
     
   return `[${timestamp}] ${level.toUpperCase()}: ${message}${formattedData}`;
 }
@@ -62,5 +66,3 @@ export const logger = {
     }
   }
 };
-
-export { logger }

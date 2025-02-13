@@ -58,6 +58,8 @@ app.get('/help', (req, res) => {
 
 app.post('/analyze-text', async (req, res) => {
   const reqId = req.id;
+  const startTime = Date.now();
+  
   try {
     const { texts, metadata } = req.body;
     
@@ -66,9 +68,14 @@ app.post('/analyze-text', async (req, res) => {
       return res.status(400).json({ error: 'Array of text prompts is required' });
     }
 
-    if (!metadata || !metadata.user_id || !metadata.subscription_id) {
-      logger.debug({ reqId }, 'Missing or invalid metadata in request body');
-      return res.status(400).json({ error: 'Metadata with user_id and subscription_id is required' });
+    const userId = metadata?.user_id;
+    const subscriptionId = metadata?.subscription_id;
+    
+    if (!userId || !subscriptionId) {
+      logger.debug({ reqId, metadata }, 'Missing or invalid metadata in request body');
+      return res.status(400).json({ 
+        error: 'Request must include metadata.user_id and metadata.subscription_id'
+      });
     }
 
     // Step 1: Fetch and parse BOE content (do this once for all prompts)
@@ -79,8 +86,6 @@ app.post('/analyze-text', async (req, res) => {
       logger.error({ reqId }, 'Failed to fetch BOE content');
       return res.status(500).json({ error: 'Failed to fetch BOE content' });
     }
-
-    const startTime = Date.now();
 
     // Step 2: Process each text prompt
     logger.debug({ reqId, promptCount: texts.length }, 'Processing multiple prompts');
@@ -123,8 +128,8 @@ app.post('/analyze-text', async (req, res) => {
     await publishResults({
       texts,
       context: {
-        user_id: metadata.user_id,
-        subscription_id: metadata.subscription_id
+        user_id: userId,
+        subscription_id: subscriptionId
       },
       results: response,
       processingTime
@@ -146,8 +151,8 @@ app.post('/analyze-text', async (req, res) => {
       await publishResults({
         texts: req.body.texts,
         context: {
-          user_id: req.body.metadata?.user_id,
-          subscription_id: req.body.metadata?.subscription_id
+          user_id: userId,
+          subscription_id: subscriptionId
         },
         results: {
           query_date: new Date().toISOString().split('T')[0],

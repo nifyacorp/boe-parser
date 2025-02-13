@@ -110,19 +110,19 @@ Authorization: Bearer YOUR_API_KEY
 ### Endpoints
 
 #### 1. Get API Documentation
-```http
+```
 GET /help
 ```
 
 Returns comprehensive API documentation.
 
 #### 2. Analyze BOE Content
-```http
+```
 POST /analyze-text
 Content-Type: application/json
 ```
 
-Analyze multiple queries against latest BOE content.
+Analyze multiple queries against the latest BOE content.
 
 Request body:
 ```json
@@ -131,48 +131,116 @@ Request body:
     "Find all resolutions about public employment",
     "List announcements about environmental grants",
     "Show orders related to education"
-  ]
+  ],
+  "metadata": {
+    "user_id": "uuid-v4-here",
+    "subscription_id": "uuid-v4-here"
+  }
 }
 ```
 
-Response format:
+Response Format:
 
 ```json
 {
-  "query_date": "2025-01-16",
+  "query_date": "2025-02-11",
   "boe_info": {
-    "issue_number": "10",
-    "publication_date": "2025-01-16",
+    "issue_number": "36",
+    "publication_date": "2025-02-11",
     "source_url": "https://www.boe.es"
   },
-  "results": [{
-    "prompt": "Find all resolutions about public employment",
-    "matches": [{
-      "document_type": "RESOLUTION",
-      "issuing_body": "Ministerio de Hacienda",
-      "title": "Full document title",
-      "dates": {
-        "document_date": "2024-12-30",
-        "publication_date": "2025-01-16"
-      },
-      "code": "BOE-A-2025-1234",
-      "section": "III. Otras disposiciones",
-      "department": "MINISTERIO DE HACIENDA",
-      "links": {
-        "pdf": "https://www.boe.es/boe/dias/2025/01/16/pdfs/BOE-A-2025-1234.pdf",
-        "html": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-1234"
-      },
-      "relevance_score": 0.95,
-      "summary": "Brief description of the document content"
-    }],
-    "metadata": {
-      "match_count": 1,
-      "max_relevance": 0.95
+  "results": [
+    {
+      "prompt": "Find all resolutions about public employment",
+      "matches": [
+        {
+          "document_type": "RESOLUTION",
+          "issuing_body": "Ministerio de Hacienda",
+          "title": "Full document title",
+          "dates": {
+            "document_date": "2025-02-10",
+            "publication_date": "2025-02-11"
+          },
+          "code": "BOE-A-2025-1234",
+          "section": "III. Otras disposiciones",
+          "department": "MINISTERIO DE HACIENDA",
+          "links": {
+            "pdf": "https://www.boe.es/boe/dias/2025/02/11/pdfs/BOE-A-2025-1234.pdf",
+            "html": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-1234"
+          },
+          "relevance_score": 0.95,
+          "summary": "Brief description of the document content"
+        }
+      ],
+      "metadata": {
+        "match_count": 1,
+        "max_relevance": 0.95
+      }
     }
-  }],
+  ],
   "metadata": {
     "total_items_processed": 45,
     "processing_time_ms": 1234
+  }
+}
+```
+
+### PubSub Message Format
+
+The service publishes analysis results to PubSub in the following format:
+
+```json
+{
+  "version": "1.0",
+  "processor_type": "boe",
+  "timestamp": "2025-02-11T12:27:36Z",
+  "trace_id": "uuid-v4-here",
+  "request": {
+    "subscription_id": "uuid-v4-here",
+    "processing_id": "unique-processing-id",
+    "user_id": "uuid-v4-here",
+    "prompts": ["search prompt 1", "search prompt 2"]
+  },
+  "results": {
+    "query_date": "2025-02-11",
+    "matches": [
+      {
+        "prompt": "search prompt 1",
+        "documents": [
+          {
+            "document_type": "boe_document",
+            "title": "Document Title",
+            "summary": "Document Summary",
+            "relevance_score": 0.95,
+            "links": {
+              "html": "https://example.com/doc.html",
+              "pdf": "https://example.com/doc.pdf"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "processing_time_ms": 1500,
+    "total_matches": 5,
+    "status": "success",
+    "error": null
+  }
+}
+```
+
+Error messages follow the same structure with `status: "error"` and error details in the metadata:
+
+```json
+{
+  "metadata": {
+    "status": "error",
+    "error": {
+      "message": "Error description",
+      "code": "ERROR_CODE",
+      "details": "Stack trace or additional information"
+    }
   }
 }
 ```
@@ -193,7 +261,7 @@ The service uses standard HTTP status codes:
 - `429`: Too Many Requests
 - `500`: Internal Server Error
 
-Error response format:
+API Error Response Format:
 ```json
 {
   "error": "Descriptive error message"
