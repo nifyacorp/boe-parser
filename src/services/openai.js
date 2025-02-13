@@ -34,16 +34,14 @@ let openai;
 
 async function analyzeChunk(chunk, query, reqId) {
   try {
-    // Log the request details
     logger.debug({ 
       reqId,
-      chunkSize: chunk.length,
-      queryLength: query.length,
-      firstItem: chunk[0]
-    }, 'Starting chunk analysis');
+      itemCount: chunk.length,
+      firstItemTitle: chunk[0]?.title || 'No title'
+    }, 'Processing chunk');
 
     const payload = {
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       temperature: 0,
       messages: [
         {
@@ -88,22 +86,7 @@ CRITICAL REQUIREMENTS:
       response_format: { type: "json_object" }
     };
 
-    logger.debug({ 
-      reqId, 
-      msg: 'OpenAI request payload',
-      payload: JSON.stringify(payload, null, 2)
-    }, 'OpenAI request payload');
-
     const response = await openai.chat.completions.create(payload);
-    
-    logger.debug({ 
-      reqId,
-      responseId: response.id,
-      model: response.model,
-      content: response.choices[0].message.content,
-      finishReason: response.choices[0].finish_reason,
-      usage: response.usage
-    }, 'Raw OpenAI response');
     
     // Clean the response content
     let cleanContent = response.choices[0].message.content.trim();
@@ -140,10 +123,8 @@ CRITICAL REQUIREMENTS:
       
       logger.debug({
         reqId,
-        matchCount: parsedResponse.matches.length,
-        maxRelevance: parsedResponse.metadata.max_relevance,
-        firstMatch: parsedResponse.matches[0]
-      }, 'Successfully parsed OpenAI response');
+        matches: parsedResponse.matches.length
+      }, 'Chunk analysis completed');
 
       return parsedResponse;
 
@@ -229,12 +210,6 @@ function mergeResults(results) {
 
 export async function analyzeWithOpenAI(text, reqId) {
   try {
-    // Log the complete items before chunking
-    logger.debug({ 
-      reqId, 
-      completeItems: JSON.parse(text.match(/BOE Content: (.*)/s)[1])
-    }, 'Complete BOE items before chunking');
-
     if (!openai) {
       logger.debug({ reqId }, 'Initializing OpenAI client');
       const apiKey = process.env.OPENAI_API_KEY;
@@ -242,7 +217,6 @@ export async function analyzeWithOpenAI(text, reqId) {
         throw new Error('OPENAI_API_KEY environment variable is not set');
       }
       openai = new OpenAI({ apiKey });
-      logger.debug({ reqId }, 'OpenAI client initialized');
     }
 
     // Parse the input to separate query from BOE content
@@ -256,16 +230,16 @@ export async function analyzeWithOpenAI(text, reqId) {
 
     // Split BOE content into chunks
     const chunks = chunkBOEContent(items);
-    logger.debug({ reqId, chunkCount: chunks.length }, 'Split BOE content into chunks');
+    logger.info({ 
+      reqId, 
+      totalChunks: chunks.length,
+      itemsPerChunk: MAX_CHUNK_SIZE,
+      totalItems: items.length 
+    }, 'Starting BOE content analysis');
 
     // Only process first two chunks for debugging
     // Process all chunks in production
     const chunksToProcess = process.env.NODE_ENV === 'development' ? chunks.slice(0, 2) : chunks;
-    logger.debug({ 
-      reqId, 
-      chunkCount: chunksToProcess.length,
-      totalItems: items.length
-    }, 'Processing chunks');
 
     // Process chunks in batches to limit concurrent requests
     const results = [];
@@ -280,7 +254,7 @@ export async function analyzeWithOpenAI(text, reqId) {
       const batchResults = await Promise.all(
         batch.map(async (chunk, index) => {
           const batchIndex = i + index;
-          logger.debug({ reqId, chunkIndex: batchIndex, itemCount: chunk.length }, 'Analyzing chunk');
+          logger.info({ reqId, currentChunk: batchIndex + 1, totalChunks: chunks.length }, 'Processing chunk');
           try {
             const result = await analyzeChunk(chunk, query, reqId);
             if (!result || !result.matches) {
@@ -305,7 +279,12 @@ export async function analyzeWithOpenAI(text, reqId) {
 
     // Merge results from all chunks
     const mergedResults = mergeResults(results);
-    logger.debug({ reqId, totalMatches: mergedResults.matches.length }, 'Merged chunk results');
+    logger.info({ 
+      reqId, 
+      totalMatches: mergedResults.matches.length,
+      processedChunks: results.length,
+      totalChunks: chunks.length
+    }, 'Analysis completed');
 
     return mergedResults;
   } catch (error) {
