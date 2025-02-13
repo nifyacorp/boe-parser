@@ -1,17 +1,20 @@
 import { logger } from '../../utils/logger.js';
 import { getOpenAIClient } from './client.js';
+import { processText } from '../textProcessor.js';
 
-export async function analyzeChunk(chunk, query, reqId) {
+export async function analyzeChunk(chunk, query, reqId, requestPayload = {}) {
   try {
     logger.debug({ 
       reqId,
       itemCount: chunk.items.length,
       tokenCount: chunk.tokenCount,
-      firstItemTitle: chunk.items[0]?.title || 'No title'
+      firstItemTitle: chunk.items[0]?.title || 'No title',
+      requestPayload
     }, 'Processing chunk');
 
     const openai = getOpenAIClient(reqId);
-    const response = await openai.chat.completions.create(createAnalysisPayload(query, chunk.items));
+    const cleanQuery = processText(query);
+    const response = await openai.chat.completions.create(createAnalysisPayload(cleanQuery, chunk.items));
     return processResponse(response, reqId);
   } catch (error) {
     return handleAnalysisError(error, chunk.items, query, reqId);

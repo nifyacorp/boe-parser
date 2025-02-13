@@ -4,7 +4,7 @@ import { analyzeChunk } from './analyzer.js';
 import { mergeResults } from './merger.js';
 import { MAX_CONCURRENT_REQUESTS } from './config.js';
 
-export async function analyzeWithOpenAI(text, reqId) {
+export async function analyzeWithOpenAI(text, reqId, requestPayload = {}) {
   try {
     // Parse the input to separate query from BOE content
     const match = text.match(/User Query: (.*?)\n\nBOE Content: (.*)/s);
@@ -20,7 +20,7 @@ export async function analyzeWithOpenAI(text, reqId) {
     const chunksToProcess = getChunksToProcess(chunks, reqId);
 
     // Process chunks in batches to limit concurrent requests
-    const results = await processBatches(chunksToProcess, query, reqId);
+    const results = await processBatches(chunksToProcess, query, reqId, requestPayload);
 
     // Merge results from all chunks
     const mergedResults = mergeResults(results);
@@ -44,7 +44,7 @@ export async function analyzeWithOpenAI(text, reqId) {
   }
 }
 
-async function processBatches(chunks, query, reqId) {
+async function processBatches(chunks, query, reqId, requestPayload) {
   const results = [];
   const isDevMode = process.env.NODE_ENV === 'development';
 
@@ -67,7 +67,7 @@ async function processBatches(chunks, query, reqId) {
         }, 'Processing chunk');
         
         try {
-          const result = await analyzeChunk(chunk, query, reqId);
+          const result = await analyzeChunk(chunk, query, reqId, requestPayload);
           if (!result || !result.matches) {
             throw new Error('Invalid response from OpenAI');
           }

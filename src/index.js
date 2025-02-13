@@ -102,7 +102,12 @@ app.post('/analyze-text', async (req, res) => {
 
       // Analyze with OpenAI
       logger.debug({ reqId, promptIndex: index }, 'Starting OpenAI analysis');
-      const analysis = await analyzeWithOpenAI(combinedText, reqId);
+      const analysis = await analyzeWithOpenAI(combinedText, reqId, {
+        metadata: {
+          user_id: userId,
+          subscription_id: subscriptionId
+        }
+      });
       logger.debug({ reqId, promptIndex: index }, 'Analysis completed');
 
       return {
