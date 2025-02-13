@@ -1,4 +1,6 @@
-export const MAX_CHUNK_SIZE = 25;
+// With GPT-4o-mini's 128k token limit, we can process ~800 items per chunk
+// Using 750 to leave room for the system prompt and response
+export const MAX_CHUNK_SIZE = 750;
 export const MAX_CONCURRENT_REQUESTS = 2;
 
 export const RESPONSE_SCHEMA = {
