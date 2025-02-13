@@ -43,7 +43,7 @@ async function analyzeChunk(chunk, query, reqId) {
     }, 'Starting chunk analysis');
 
     const payload = {
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       temperature: 0,
       messages: [
         {
@@ -85,7 +85,6 @@ CRITICAL REQUIREMENTS:
           content: `User Query: ${query}\n\nBOE Content: ${JSON.stringify(chunk)}`
         }
       ],
-      max_tokens: 500,
       response_format: { type: "json_object" }
     };
 
