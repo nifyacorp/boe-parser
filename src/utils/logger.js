@@ -62,3 +62,5 @@ export const logger = {
     }
   }
 };
+
+export { logger }
