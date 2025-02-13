@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import { logger } from './utils/logger.js';
 import { scrapeWebsite } from './services/scraper.js';
 import { processText } from './services/textProcessor.js';
-import { analyzeWithOpenAI } from './services/openai.js';
+import { analyzeWithOpenAI } from './services/openai/index.js';
 import { publishResults } from './utils/pubsub.js';
 import { randomUUID } from 'crypto';
 import { validateApiKey } from './utils/auth.js';
