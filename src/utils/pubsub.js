@@ -59,7 +59,10 @@ export async function publishResults({ texts, context, results, processingTime, 
             links: {
               html: match.links.html,
               pdf: match.links.pdf
-            }
+            },
+            publication_date: match.dates?.publication_date || results.boe_info?.publication_date || new Date().toISOString(),
+            section: match.section || '',
+            bulletin_type: match.document_type || 'OTHER'
           }))
         }))
       },
