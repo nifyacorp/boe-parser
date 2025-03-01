@@ -47,7 +47,8 @@ REQUIRED RESPONSE FORMAT:
   "matches": [{
     "document_type": "string (RESOLUTION, ORDER, ROYAL_DECREE, LAW, ANNOUNCEMENT)",
     "issuing_body": "string",
-    "title": "string",
+    "title": "string (MUST be descriptive, concise, and informative - do not use generic titles)",
+    "notification_title": "string (A short, user-friendly title for notification displays, MAX 80 chars)",
     "dates": {
       "document_date": "YYYY-MM-DD",
       "publication_date": "YYYY-MM-DD"
@@ -60,7 +61,7 @@ REQUIRED RESPONSE FORMAT:
       "html": "string"
     },
     "relevance_score": "number (0-1)",
-    "summary": "string"
+    "summary": "string (A concise summary of the document's content for notifications)"
   }],
   "metadata": {
     "match_count": "number",
@@ -70,7 +71,10 @@ REQUIRED RESPONSE FORMAT:
 
 CRITICAL REQUIREMENTS:
 1. Response MUST be valid JSON - no markdown, no backticks, no explanations
-2. All fields are required - use empty strings or 0 for missing values`;
+2. All fields are required - use empty strings or 0 for missing values
+3. Title field MUST be descriptive and specific to the content, not generic
+4. notification_title should be a user-friendly version optimized for notification displays
+5. Summary should be structured to provide clear, concise information for notifications`;
 }
 
 function processResponse(response, reqId) {
