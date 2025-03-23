@@ -48,7 +48,7 @@ REQUIRED RESPONSE FORMAT:
     "document_type": "string (RESOLUTION, ORDER, ROYAL_DECREE, LAW, ANNOUNCEMENT)",
     "issuing_body": "string",
     "title": "string (MUST be descriptive, concise, and informative - do not use generic titles)",
-    "notification_title": "string (A short, user-friendly title for notification displays, MAX 80 chars)",
+    "notification_title": "string (A short, user-friendly title for notification displays, MAX 80 chars - THIS IS CRITICAL)",
     "dates": {
       "document_date": "YYYY-MM-DD",
       "publication_date": "YYYY-MM-DD"
@@ -69,12 +69,24 @@ REQUIRED RESPONSE FORMAT:
   }
 }
 
+CRITICAL NOTIFICATION TITLE REQUIREMENTS:
+- The notification_title field is EXTREMELY IMPORTANT - it MUST be descriptive and specific 
+- It should follow this format: [Document Type] - [Key Subject] - [Issuing Body if relevant]
+- Examples of good notification titles:
+  * "Resolución: Ayudas para la renovación de vehículos"
+  * "Ley de Presupuestos Generales del Estado 2025"
+  * "Convocatoria: Becas universitarias - Ministerio de Educación"
+- DO NOT use generic titles like "New notification" or "BOE document"
+- notification_title MUST be clear, concise and informative
+- notification_title MUST be 80 characters or less
+- notification_title MUST be in Spanish
+
 CRITICAL REQUIREMENTS:
 1. Response MUST be valid JSON - no markdown, no backticks, no explanations
 2. All fields are required - use empty strings or 0 for missing values
 3. Title field MUST be descriptive and specific to the content, not generic
-4. notification_title should be a user-friendly version optimized for notification displays
-5. Summary should be structured to provide clear, concise information for notifications`;
+4. Summary should be structured to provide clear, concise information for notifications
+5. Analysis should be thorough but focus on practical relevance to the user query`;
 }
 
 function processResponse(response, reqId) {
