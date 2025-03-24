@@ -80,11 +80,21 @@ app.post('/analyze-text', async (req, res) => {
 
     // Step 1: Fetch and parse BOE content (do this once for all prompts)
     logger.debug({ reqId }, 'Fetching BOE content');
-    const boeContent = await scrapeWebsite();
+    const boeContent = await scrapeWebsite(null, reqId);
     
-    if (!boeContent || !boeContent.items) {
+    if (!boeContent) {
       logger.error({ reqId }, 'Failed to fetch BOE content');
       return res.status(500).json({ error: 'Failed to fetch BOE content' });
+    }
+    
+    // Always ensure boeContent.items exists, even if empty
+    if (!boeContent.items) {
+      boeContent.items = [];
+    }
+    
+    // If items array is empty, log a warning but continue processing
+    if (boeContent.items.length === 0) {
+      logger.warn({ reqId, boeInfo: boeContent.boeInfo }, 'No BOE items found for the requested date');
     }
 
     // Step 2: Process each text prompt
@@ -153,20 +163,36 @@ app.post('/analyze-text', async (req, res) => {
 
     // Publish error to PubSub
     try {
+      // Get user_id and subscription_id from request if available
+      const userId = req.body?.metadata?.user_id || 'unknown';
+      const subscriptionId = req.body?.metadata?.subscription_id || 'unknown';
+      
       await publishResults({
-        texts: req.body.texts,
+        texts: req.body?.texts || [],
         context: {
           user_id: userId,
           subscription_id: subscriptionId
         },
         results: {
           query_date: new Date().toISOString().split('T')[0],
-          boe_info: null,
+          boe_info: {
+            issue_number: 'ERROR',
+            publication_date: new Date().toISOString().split('T')[0],
+            source_url: 'N/A',
+            error: error.message,
+            note: 'Processing failed'
+          },
           results: []
         },
         processingTime: Date.now() - startTime,
-        error
+        error: {
+          message: error.message,
+          stack: error.stack,
+          code: error.code
+        }
       });
+      
+      logger.debug({ reqId }, 'Successfully published error to PubSub');
     } catch (pubsubError) {
       logger.error({
         reqId,

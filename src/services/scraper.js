@@ -116,23 +116,56 @@ export async function scrapeWebsite(url, reqId) {
     url = getYesterdayBOEUrl();
     
     logger.debug({ reqId, url }, 'Starting BOE fetch');
-    const response = await axios.get(url);
-    logger.debug({ reqId, status: response.status }, 'BOE fetch completed');
-
-    const dom = new JSDOM(response.data);
     
-    const boeInfo = extractBOEInfo(dom);
-    if (!boeInfo) {
-      throw new Error('Failed to extract BOE information');
+    try {
+      const response = await axios.get(url);
+      logger.debug({ reqId, status: response.status }, 'BOE fetch completed');
+
+      const dom = new JSDOM(response.data);
+      
+      const boeInfo = extractBOEInfo(dom);
+      if (!boeInfo) {
+        logger.warn({ reqId, url }, 'Failed to extract BOE information, possibly invalid format');
+        return {
+          items: [],
+          boeInfo: {
+            issue_number: 'N/A',
+            publication_date: new Date().toISOString().split('T')[0],
+            source_url: url,
+            note: 'No BOE information could be extracted'
+          }
+        };
+      }
+
+      const items = extractBOEItems(dom);
+      logger.debug({ reqId, itemCount: items.length }, 'BOE items extracted');
+
+      return {
+        items,
+        boeInfo
+      };
+      
+    } catch (error) {
+      // Handle 404 error (no BOE for this date) gracefully
+      if (error.response && error.response.status === 404) {
+        logger.info({ reqId, url }, 'No BOE found for this date (404 response)');
+        
+        // Return empty results instead of throwing an error
+        return {
+          items: [],
+          boeInfo: {
+            issue_number: 'N/A',
+            publication_date: new Date().toISOString().split('T')[0],
+            source_url: url,
+            note: 'No BOE published for this date'
+          }
+        };
+      }
+      
+      // For other errors, rethrow
+      throw error;
     }
-
-    const items = extractBOEItems(dom);
-    logger.debug({ reqId, itemCount: items.length }, 'BOE items extracted');
-
-    return {
-      items,
-      boeInfo
-    };
+    
   } catch (error) {
     logger.error({ 
       reqId,
@@ -141,6 +174,17 @@ export async function scrapeWebsite(url, reqId) {
       url,
       code: error.code 
     }, 'Error scraping BOE website');
-    throw new Error(`Failed to scrape BOE website: ${error.message}`);
+    
+    // Return empty results with error info instead of throwing
+    return {
+      items: [],
+      boeInfo: {
+        issue_number: 'ERROR',
+        publication_date: new Date().toISOString().split('T')[0],
+        source_url: url,
+        error: error.message,
+        note: 'Failed to retrieve BOE data'
+      }
+    };
   }
 }
