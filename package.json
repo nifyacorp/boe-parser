@@ -9,14 +9,15 @@
     "lint": "eslint src/**/*.js"
   },
   "dependencies": {
+    "@google-cloud/pubsub": "^4.0.7",
+    "@google-cloud/secret-manager": "^5.0.0",
+    "@google/generative-ai": "^0.24.0",
     "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "fast-xml-parser": "^4.3.2",
     "gpt-tokenizer": "^2.1.2",
     "jsdom": "^24.0.0",
-    "@google-cloud/pubsub": "^4.0.7",
-    "@google-cloud/secret-manager": "^5.0.0",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
     "openai": "^4.20.1",
     "pino": "^8.16.2"
   },
