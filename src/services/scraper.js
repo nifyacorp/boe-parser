@@ -118,7 +118,20 @@ export async function scrapeWebsite(url, reqId) {
     logger.debug({ reqId, url }, 'Starting BOE fetch');
     
     try {
-      const response = await axios.get(url);
+      // Create axios instance with proper connection handling
+      const axiosInstance = axios.create({
+        timeout: 30000, // 30 second timeout
+        headers: {
+          'Connection': 'keep-alive',
+          'User-Agent': 'NIFYA-BOE-Parser/1.0'
+        },
+        maxRedirects: 5,
+        decompress: true,
+        // Don't throw on 404s
+        validateStatus: status => status < 500
+      });
+      
+      const response = await axiosInstance.get(url);
       logger.debug({ reqId, status: response.status }, 'BOE fetch completed');
 
       const dom = new JSDOM(response.data);
