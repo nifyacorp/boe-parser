@@ -21,52 +21,97 @@ export async function publishResults(payload) {
     // Ensure we have a trace ID for tracking
     const traceId = payload.trace_id || randomUUID();
     
-    // Create a standardized message structure that the notification worker expects
-    // Based on validation warnings, we need to include all expected fields
+    // NOTE: This is a completely new implementation that exactly follows the 
+    // format expected by the notification worker based on validation warnings
+    
+    // Extract the flat matches array from results if it exists
+    let matches = [];
+    
+    // Try different paths to find matches
+    if (Array.isArray(payload.results?.matches)) {
+      matches = payload.results.matches;
+    } else if (Array.isArray(payload.results?.results?.[0]?.matches)) {
+      matches = payload.results.results[0].matches;
+    } else if (payload.results?.results) {
+      // Extract matches from all results
+      matches = payload.results.results.flatMap(r => 
+        Array.isArray(r.matches) ? r.matches.map(m => ({...m, prompt: r.prompt})) : []
+      );
+    }
+    
+    // Ensure we have the query date (today if not specified)
+    const queryDate = payload.results?.query_date || new Date().toISOString().split('T')[0];
+    
+    // Ensure we have BOE info
+    const boeInfo = payload.results?.boe_info || {
+      issue_number: 'N/A',
+      publication_date: queryDate,
+      source_url: 'https://www.boe.es'
+    };
+    
+    // Get subscription ID and user ID from payload
+    const subscriptionId = payload.request?.subscription_id || payload.context?.subscription_id || 'unknown';
+    const userId = payload.request?.user_id || payload.context?.user_id || 'unknown';
+    
+    // Get prompts from payload
+    const prompts = payload.request?.texts || payload.texts || ['General information'];
+    
+    // Create the message structure that EXACTLY matches what the notification worker expects
     const message = {
+      // Required version field
       version: '1.0',
       trace_id: traceId,
       processor_type: 'boe',
       timestamp: new Date().toISOString(),
       
-      // Request details
+      // Request details with required fields
       request: {
-        subscription_id: payload.request?.subscription_id || payload.context?.subscription_id || 'unknown',
-        user_id: payload.request?.user_id || payload.context?.user_id || 'unknown',
+        subscription_id: subscriptionId,
+        user_id: userId,
         processing_id: randomUUID(),
-        prompts: payload.request?.texts || payload.texts || ['General information']
+        prompts: prompts
       },
       
-      // Processing results with matches for the notification worker to process
+      // Results section with required query_date
       results: {
-        query_date: new Date().toISOString().split('T')[0],
-        boe_info: {
-          issue_number: payload.boe_info?.issue_number || 'N/A',
-          publication_date: payload.boe_info?.publication_date || new Date().toISOString().split('T')[0],
-          source_url: payload.boe_info?.source_url || 'https://www.boe.es'
-        },
-        matches: payload.results?.matches?.map(match => ({
-          document_type: match.document_type || 'OTHER',
-          title: match.title || 'No title',
-          notification_title: match.notification_title || match.title || 'Notification',
-          issuing_body: match.issuing_body || '',
-          summary: match.summary || '',
-          relevance_score: match.relevance_score || 0,
-          prompt: match.prompt || payload.request?.texts?.[0] || 'General information',
-          links: match.links || { html: '', pdf: '' }
-        })) || []
+        query_date: queryDate,
+        boe_info: boeInfo,
+        // Convert results to the expected format for the notification worker
+        results: [
+          {
+            prompt: prompts[0] || 'General information',
+            matches: matches.map(match => ({
+              document_type: match.document_type || 'OTHER',
+              title: match.title || 'No title',
+              notification_title: match.notification_title || match.title || 'Notification',
+              issuing_body: match.issuing_body || '',
+              summary: match.summary || '',
+              relevance_score: match.relevance_score || 0,
+              links: match.links || { html: '', pdf: '' }
+            }))
+          }
+        ]
       },
       
-      // Metadata about the processing
+      // Metadata with required fields
       metadata: {
         processing_time_ms: payload.metadata?.processing_time_ms || 0,
         total_items_processed: payload.metadata?.total_items_processed || 0,
-        total_matches: payload.results?.matches?.length || 0,
+        total_matches: matches.length,
         model_used: payload.metadata?.model_used || "gemini-2.0-pro-exp-02-05",
         status: payload.metadata?.status || 'success',
         error: null
       }
     };
+    
+    // Log the exact message structure we're sending (for debugging)
+    logger.debug({
+      pubsub_message: JSON.stringify(message, null, 2).substring(0, 1000) + (JSON.stringify(message).length > 1000 ? '...' : ''),
+      trace_id: traceId,
+      subscription_id: subscriptionId,
+      user_id: userId,
+      matches_count: matches.length
+    }, 'PubSub message structure');
     
     // Handle error case
     if (payload.error || payload.metadata?.error) {
@@ -74,6 +119,7 @@ export async function publishResults(payload) {
       message.metadata.status = "error";
     }
     
+    // Create the buffer for publishing
     const dataBuffer = Buffer.from(JSON.stringify(message));
     
     // Publish to main topic
