@@ -22,7 +22,9 @@ export async function publishResults(payload) {
     const traceId = payload.trace_id || randomUUID();
     
     // Create a standardized message structure that the notification worker expects
+    // Based on validation warnings, we need to include all expected fields
     const message = {
+      version: '1.0',
       trace_id: traceId,
       processor_type: 'boe',
       timestamp: new Date().toISOString(),
@@ -31,20 +33,38 @@ export async function publishResults(payload) {
       request: {
         subscription_id: payload.request?.subscription_id || payload.context?.subscription_id || 'unknown',
         user_id: payload.request?.user_id || payload.context?.user_id || 'unknown',
-        texts: payload.request?.texts || payload.texts || []
+        processing_id: randomUUID(),
+        prompts: payload.request?.texts || payload.texts || ['General information']
       },
       
       // Processing results with matches for the notification worker to process
       results: {
-        matches: payload.results?.matches || []
+        query_date: new Date().toISOString().split('T')[0],
+        boe_info: {
+          issue_number: payload.boe_info?.issue_number || 'N/A',
+          publication_date: payload.boe_info?.publication_date || new Date().toISOString().split('T')[0],
+          source_url: payload.boe_info?.source_url || 'https://www.boe.es'
+        },
+        matches: payload.results?.matches?.map(match => ({
+          document_type: match.document_type || 'OTHER',
+          title: match.title || 'No title',
+          notification_title: match.notification_title || match.title || 'Notification',
+          issuing_body: match.issuing_body || '',
+          summary: match.summary || '',
+          relevance_score: match.relevance_score || 0,
+          prompt: match.prompt || payload.request?.texts?.[0] || 'General information',
+          links: match.links || { html: '', pdf: '' }
+        })) || []
       },
       
       // Metadata about the processing
       metadata: {
         processing_time_ms: payload.metadata?.processing_time_ms || 0,
         total_items_processed: payload.metadata?.total_items_processed || 0,
+        total_matches: payload.results?.matches?.length || 0,
         model_used: payload.metadata?.model_used || "gemini-2.0-pro-exp-02-05",
-        status: payload.metadata?.status || 'success'
+        status: payload.metadata?.status || 'success',
+        error: null
       }
     };
     
