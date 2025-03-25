@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import { logger } from './utils/logger.js';
 import { scrapeWebsite } from './services/scraper.js';
 import { processText } from './services/textProcessor.js';
-import { analyzeWithOpenAI } from './services/openai/index.js';
+import { analyzeWithGemini } from './services/gemini/index.js';
 import { publishResults } from './utils/pubsub.js';
 import { randomUUID } from 'crypto';
 import { validateApiKey } from './utils/auth.js';
@@ -56,6 +56,11 @@ app.get('/help', (req, res) => {
   res.json(docs);
 });
 
+app.get('/health', (req, res) => {
+  // Simple health check endpoint
+  res.status(200).json({ status: 'OK', version: process.env.VERSION || '1.0.0' });
+});
+
 app.post('/analyze-text', async (req, res) => {
   const reqId = req.id;
   const startTime = Date.now();
@@ -105,14 +110,9 @@ app.post('/analyze-text', async (req, res) => {
       const cleanText = processText(text);
       logger.debug({ reqId, promptIndex: index, cleanText }, 'Text processed');
 
-      // Combine user input with BOE content
-      logger.debug({ reqId, promptIndex: index }, 'Combining input with BOE content');
-      const combinedText = `User Query: ${cleanText}\n\nBOE Content: ${JSON.stringify(boeContent.items)}`;
-      logger.debug({ reqId, promptIndex: index, combinedLength: combinedText.length }, 'Content combined');
-
-      // Analyze with OpenAI
-      logger.debug({ reqId, promptIndex: index }, 'Starting OpenAI analysis');
-      const analysis = await analyzeWithOpenAI(combinedText, reqId, {
+      // Analyze with Gemini
+      logger.debug({ reqId, promptIndex: index }, 'Starting Gemini analysis');
+      const analysis = await analyzeWithGemini(boeContent.items, cleanText, reqId, {
         metadata: {
           user_id: userId,
           subscription_id: subscriptionId
@@ -135,21 +135,33 @@ app.post('/analyze-text', async (req, res) => {
       results,
       metadata: {
         total_items_processed: boeContent.items.length,
-        processing_time_ms: processingTime
+        processing_time_ms: processingTime,
+        model_used: "gemini-2.0-pro-exp-02-05"
       }
     };
 
-    // Publish results to PubSub
-    await publishResults({
-      texts,
-      context: {
+    // Prepare and publish results to PubSub with consistent structure
+    const publishPayload = {
+      trace_id: reqId,
+      request: {
+        texts,
         user_id: userId,
         subscription_id: subscriptionId
       },
-      results: response,
-      processingTime
-    });
+      results: {
+        matches: results.flatMap(r => r.matches.map(m => ({
+          ...m,
+          prompt: r.prompt
+        })))
+      },
+      processor_type: "boe",
+      metadata: {
+        processing_time_ms: processingTime,
+        total_items_processed: boeContent.items.length
+      }
+    };
 
+    await publishResults(publishPayload);
     logger.debug({ reqId, resultCount: results.length }, 'Analysis completed and published to PubSub');
     res.json(response);
 
@@ -167,31 +179,26 @@ app.post('/analyze-text', async (req, res) => {
       const userId = req.body?.metadata?.user_id || 'unknown';
       const subscriptionId = req.body?.metadata?.subscription_id || 'unknown';
       
-      await publishResults({
-        texts: req.body?.texts || [],
-        context: {
+      const errorPayload = {
+        trace_id: reqId,
+        request: {
+          texts: req.body?.texts || [],
           user_id: userId,
           subscription_id: subscriptionId
         },
         results: {
-          query_date: new Date().toISOString().split('T')[0],
-          boe_info: {
-            issue_number: 'ERROR',
-            publication_date: new Date().toISOString().split('T')[0],
-            source_url: 'N/A',
-            error: error.message,
-            note: 'Processing failed'
-          },
-          results: []
+          matches: []
         },
-        processingTime: Date.now() - startTime,
-        error: {
-          message: error.message,
-          stack: error.stack,
-          code: error.code
+        processor_type: "boe",
+        metadata: {
+          processing_time_ms: Date.now() - startTime,
+          error: error.message,
+          error_type: error.name,
+          status: "error"
         }
-      });
-      
+      };
+
+      await publishResults(errorPayload);
       logger.debug({ reqId }, 'Successfully published error to PubSub');
     } catch (pubsubError) {
       logger.error({
@@ -206,5 +213,5 @@ app.post('/analyze-text', async (req, res) => {
 });
 
 app.listen(port, () => {
-  logger.info(`Server running on port ${port}`);
+  logger.info(`BOE Parser service running on port ${port}`);
 });
