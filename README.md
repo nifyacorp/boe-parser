@@ -187,7 +187,12 @@ Response Format:
 
 ### PubSub Message Format
 
-The service publishes analysis results to PubSub in the following format:
+The service publishes analysis results to PubSub following a standardized message schema shared between all NIFYA services. This ensures compatibility between the boe-parser and notification-worker.
+
+For the complete and up-to-date schema documentation, see:
+- [NIFYA PubSub Message Schema Documentation](/docs/pubsub-structure.md)
+
+**Example of a successful message:**
 
 ```json
 {
@@ -215,7 +220,10 @@ The service publishes analysis results to PubSub in the following format:
             "links": {
               "html": "https://example.com/doc.html",
               "pdf": "https://example.com/doc.pdf"
-            }
+            },
+            "publication_date": "2025-02-11T00:00:00.000Z",
+            "section": "II.B",
+            "bulletin_type": "BOE"
           }
         ]
       }
@@ -223,24 +231,40 @@ The service publishes analysis results to PubSub in the following format:
   },
   "metadata": {
     "processing_time_ms": 1500,
+    "total_items_processed": 1936,
     "total_matches": 5,
+    "model_used": "gemini-2.0-pro-exp-02-05",
     "status": "success",
     "error": null
   }
 }
 ```
 
-Error messages follow the same structure with `status: "error"` and error details in the metadata:
+**Error messages** follow the same structure with `status: "error"` and error details in the metadata:
 
 ```json
 {
+  "version": "1.0",
+  "processor_type": "boe",
+  "timestamp": "2025-02-11T12:27:36Z",
+  "trace_id": "uuid-v4-here",
+  "request": {
+    "subscription_id": "uuid-v4-here",
+    "processing_id": "unique-processing-id",
+    "user_id": "uuid-v4-here",
+    "prompts": ["search prompt 1"]
+  },
+  "results": {
+    "query_date": "2025-02-11",
+    "matches": []
+  },
   "metadata": {
+    "processing_time_ms": 1500,
+    "total_items_processed": 0,
+    "total_matches": 0,
+    "model_used": "gemini-2.0-pro-exp-02-05",
     "status": "error",
-    "error": {
-      "message": "Error description",
-      "code": "ERROR_CODE",
-      "details": "Stack trace or additional information"
-    }
+    "error": "Error description"
   }
 }
 ```

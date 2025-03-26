@@ -21,8 +21,9 @@ export async function publishResults(payload) {
     // Ensure we have a trace ID for tracking
     const traceId = payload.trace_id || randomUUID();
     
-    // NOTE: This is a completely new implementation that exactly follows the 
-    // format expected by the notification worker based on validation warnings
+    // IMPORTANT: This implementation follows the standardized message schema
+    // as defined in the notification-worker/src/types/boe.js
+    // Any changes to this structure must be coordinated with notification-worker
     
     // Extract the flat matches array from results if it exists
     let matches = [];
@@ -56,7 +57,35 @@ export async function publishResults(payload) {
     // Get prompts from payload
     const prompts = payload.request?.texts || payload.texts || ['General information'];
     
+    // Transform all matches into BOE notification worker format
+    const transformedMatches = matches.map(match => {
+      return {
+        prompt: match.prompt || prompts[0] || 'General information',
+        documents: [{
+          document_type: 'boe_document',
+          title: match.title || 'No title',
+          notification_title: match.notification_title || match.title || 'Notification',
+          issuing_body: match.issuing_body || '',
+          summary: match.summary || '',
+          relevance_score: match.relevance_score || 0,
+          links: match.links || { html: 'https://www.boe.es', pdf: '' },
+          publication_date: match.publication_date || new Date().toISOString(),
+          section: match.section || 'general',
+          bulletin_type: match.bulletin_type || 'BOE'
+        }]
+      };
+    });
+    
+    // If no matches were found, create a single empty match structure
+    if (transformedMatches.length === 0) {
+      transformedMatches.push({
+        prompt: prompts[0] || 'General information',
+        documents: []
+      });
+    }
+    
     // Create the message structure that EXACTLY matches what the notification worker expects
+    // according to the BOEMessageSchema in notification-worker/src/types/boe.js
     const message = {
       // Required version field
       version: '1.0',
@@ -72,25 +101,10 @@ export async function publishResults(payload) {
         prompts: prompts
       },
       
-      // Results section with required query_date
+      // Results section with required query_date and matches array (not nested under results)
       results: {
         query_date: queryDate,
-        boe_info: boeInfo,
-        // Convert results to the expected format for the notification worker
-        results: [
-          {
-            prompt: prompts[0] || 'General information',
-            matches: matches.map(match => ({
-              document_type: match.document_type || 'OTHER',
-              title: match.title || 'No title',
-              notification_title: match.notification_title || match.title || 'Notification',
-              issuing_body: match.issuing_body || '',
-              summary: match.summary || '',
-              relevance_score: match.relevance_score || 0,
-              links: match.links || { html: '', pdf: '' }
-            }))
-          }
-        ]
+        matches: transformedMatches
       },
       
       // Metadata with required fields
@@ -106,11 +120,11 @@ export async function publishResults(payload) {
     
     // Log the exact message structure we're sending (for debugging)
     logger.debug({
-      pubsub_message: JSON.stringify(message, null, 2).substring(0, 1000) + (JSON.stringify(message).length > 1000 ? '...' : ''),
+      pubsub_message: message,
       trace_id: traceId,
       subscription_id: subscriptionId,
       user_id: userId,
-      matches_count: matches.length
+      matches_count: transformedMatches.length
     }, 'PubSub message structure');
     
     // Handle error case
