@@ -109,85 +109,131 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
     const inputMessage = JSON.stringify(boeItems);
     
     // Send the message and get the response
+    let jsonResponse;
     try {
+      // Log attempt to process with Gemini
+      logger.info({
+        reqId,
+        model: "gemini-2.0-pro-exp-02-05",
+        promptLength: prompt.length,
+        itemsCount: boeItems.length
+      }, 'Sending request to Gemini API');
+
       const result = await chatSession.sendMessage(inputMessage);
       const responseText = result.response.text();
       
       // Log the raw response for debugging
-      logger.debug({
+      logger.info({
         reqId,
-        rawResponse: responseText.substring(0, 1000) + (responseText.length > 1000 ? '...' : '')
-      }, 'Gemini raw response');
+        responseLength: responseText.length,
+        responsePreview: responseText.substring(0, 200) + (responseText.length > 200 ? '...' : '')
+      }, 'Received response from Gemini');
       
       // Try to parse the JSON response
-      let jsonResponse;
       try {
         // Extract JSON from response (in case there's any text wrapping it)
         const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        const jsonString = jsonMatch ? jsonMatch[0] : responseText;
-        
-        jsonResponse = JSON.parse(jsonString);
-        
-        // Ensure the response has the correct structure
-        if (!jsonResponse.matches) {
-          logger.warn({
+        if (!jsonMatch) {
+          logger.error({
             reqId,
-            responseStructure: Object.keys(jsonResponse).join(',')
-          }, 'Gemini response missing matches array');
+            responseText: responseText.substring(0, 500) + (responseText.length > 500 ? '...' : '')
+          }, 'No JSON object found in Gemini response');
           
           jsonResponse = { matches: [] };
+        } else {
+          const jsonString = jsonMatch[0];
+          
+          logger.debug({
+            reqId,
+            extractedJson: jsonString.substring(0, 200) + (jsonString.length > 200 ? '...' : '')
+          }, 'Extracted JSON from Gemini response');
+          
+          jsonResponse = JSON.parse(jsonString);
+          
+          // Ensure the response has the correct structure
+          if (!jsonResponse.matches) {
+            logger.warn({
+              reqId,
+              responseStructure: Object.keys(jsonResponse).join(',')
+            }, 'Gemini response missing matches array');
+            
+            jsonResponse = { matches: [] };
+          }
+          
+          // Validate each match
+          jsonResponse.matches = jsonResponse.matches.map(match => {
+            // Ensure title length <= 80 chars
+            if (match.title && match.title.length > 80) {
+              match.title = match.title.substring(0, 77) + '...';
+            }
+            
+            // Ensure notification_title length <= 80 chars
+            if (match.notification_title && match.notification_title.length > 80) {
+              match.notification_title = match.notification_title.substring(0, 77) + '...';
+            } else if (!match.notification_title && match.title) {
+              // Create notification_title from title if missing
+              match.notification_title = match.title.length > 80 ? 
+                match.title.substring(0, 77) + '...' : match.title;
+            }
+            
+            // Ensure summary length <= 200 chars
+            if (match.summary && match.summary.length > 200) {
+              match.summary = match.summary.substring(0, 197) + '...';
+            }
+            
+            // Ensure relevance_score is a number
+            if (typeof match.relevance_score !== 'number') {
+              match.relevance_score = parseFloat(match.relevance_score) || 75;
+            }
+            
+            return match;
+          });
         }
-        
-        // Validate each match
-        jsonResponse.matches = jsonResponse.matches.map(match => {
-          // Ensure title length <= 80 chars
-          if (match.title && match.title.length > 80) {
-            match.title = match.title.substring(0, 77) + '...';
-          }
-          
-          // Ensure notification_title length <= 80 chars
-          if (match.notification_title && match.notification_title.length > 80) {
-            match.notification_title = match.notification_title.substring(0, 77) + '...';
-          } else if (!match.notification_title && match.title) {
-            // Create notification_title from title if missing
-            match.notification_title = match.title.length > 80 ? 
-              match.title.substring(0, 77) + '...' : match.title;
-          }
-          
-          // Ensure summary length <= 200 chars
-          if (match.summary && match.summary.length > 200) {
-            match.summary = match.summary.substring(0, 197) + '...';
-          }
-          
-          // Ensure relevance_score is a number
-          if (typeof match.relevance_score !== 'number') {
-            match.relevance_score = parseFloat(match.relevance_score) || 75;
-          }
-          
-          return match;
-        });
-        
-      } catch (error) {
+      } catch (parseError) {
         logger.error({
           reqId,
-          error: error.message,
-          responseText: responseText.substring(0, 500) + '...'
+          error: parseError.message,
+          errorType: parseError.name,
+          responseText: responseText.substring(0, 500) + (responseText.length > 500 ? '...' : '')
         }, 'Failed to parse Gemini response as JSON');
         
         // Return empty matches if parsing fails
-        jsonResponse = { matches: [] };
+        jsonResponse = { 
+          matches: [],
+          metadata: {
+            error: parseError.message,
+            error_type: 'JsonParsingError'
+          }
+        };
       }
     } catch (geminiError) {
-      logger.error({
+      // Detailed error logging
+      const errorObj = {
         reqId,
-        error: geminiError.message,
+        errorMessage: geminiError.message,
+        errorName: geminiError.name,
+        errorCode: geminiError.code || 'unknown',
         stack: geminiError.stack
-      }, 'Gemini analysis failed');
+      };
+      
+      // Check for specific Gemini error types
+      if (geminiError.response) {
+        errorObj.statusCode = geminiError.response.status || 'unknown';
+        errorObj.statusText = geminiError.response.statusText || 'unknown';
+        errorObj.responseData = geminiError.response.data || 'no data';
+      }
+      
+      logger.error(errorObj, 'Gemini API request failed');
+      console.error('Gemini analysis error details:', JSON.stringify(errorObj, null, 2));
       
       // Return empty matches if Gemini fails completely
       jsonResponse = { 
         matches: [],
-        error: geminiError.message
+        metadata: {
+          error: geminiError.message,
+          error_type: geminiError.name || 'GeminiApiError',
+          error_code: geminiError.code || 'unknown'
+        }
       };
     }
     

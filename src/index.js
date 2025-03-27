@@ -12,6 +12,36 @@ import { getApiDocs } from './utils/apiDocs.js';
 // Load environment variables
 dotenv.config();
 
+// Check for required environment variables at startup
+function checkRequiredEnvVars() {
+  const requiredVars = [
+    'GEMINI_API_KEY',
+    'BOE_API_KEY'
+  ];
+  
+  const missingVars = requiredVars.filter(varName => !process.env[varName]);
+  
+  if (missingVars.length > 0) {
+    console.error('ERROR: Missing required environment variables:', missingVars.join(', '));
+    console.error('The application might not function correctly without these variables.');
+    
+    // For Gemini API key, add specific information
+    if (missingVars.includes('GEMINI_API_KEY')) {
+      console.error('GEMINI_API_KEY is required for the BOE analyzer to function.');
+      console.error('You can use a Secret Manager reference like projects/PROJECT_ID/secrets/GEMINI_API_KEY/versions/latest');
+    }
+    
+    // Don't exit to allow Cloud Run to still start the service,
+    // but log a warning that functionality will be limited
+    console.warn('WARNING: Starting service with limited functionality due to missing environment variables.');
+  } else {
+    console.log('All required environment variables are set.');
+  }
+}
+
+// Check environment variables at startup
+checkRequiredEnvVars();
+
 const app = express();
 const port = parseInt(process.env.PORT) || 8080;
 
@@ -59,6 +89,71 @@ app.get('/help', (req, res) => {
 app.get('/health', (req, res) => {
   // Simple health check endpoint
   res.status(200).json({ status: 'OK', version: process.env.VERSION || '1.0.0' });
+});
+
+// Test Gemini API key endpoint
+app.get('/check-gemini', async (req, res) => {
+  const reqId = req.id;
+  
+  try {
+    logger.info({ reqId }, 'Testing Gemini API connection');
+    
+    // Get the Gemini client
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    
+    // Get API key from environment
+    const apiKey = process.env.GEMINI_API_KEY;
+    
+    if (!apiKey) {
+      logger.error({ reqId }, 'GEMINI_API_KEY environment variable is not set');
+      return res.status(500).json({ 
+        status: 'ERROR', 
+        error: 'GEMINI_API_KEY environment variable is not set' 
+      });
+    }
+    
+    logger.info({ reqId, keyLength: apiKey.length }, 'API key found, initializing Gemini');
+    
+    // Initialize the client
+    const genAI = new GoogleGenerativeAI(apiKey);
+    
+    // Get the model
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-pro-exp-02-05",
+    });
+    
+    // Try a simple generation to test the API key
+    logger.info({ reqId }, 'Sending test prompt to Gemini API');
+    
+    const result = await model.generateContent("Respond with 'Gemini API is working!' if you can read this message.");
+    const response = await result.response.text();
+    
+    logger.info({ reqId, response }, 'Received response from Gemini API');
+    
+    // Check if the response contains the expected phrase
+    const isWorking = response.includes('working') || response.includes('Gemini');
+    
+    res.json({
+      status: isWorking ? 'OK' : 'WARNING',
+      gemini_api: isWorking ? 'Connected' : 'Unexpected response',
+      response: response,
+      version: process.env.VERSION || '1.0.0'
+    });
+  } catch (error) {
+    logger.error({ 
+      reqId, 
+      error: error.message,
+      errorName: error.name,
+      stack: error.stack
+    }, 'Gemini API test failed');
+    
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message,
+      error_type: error.name || 'Unknown',
+      suggestion: 'Check if GEMINI_API_KEY is properly set in environment variables'
+    });
+  }
 });
 
 // Test endpoint to trigger the BOE parser process and return diagnostic information
