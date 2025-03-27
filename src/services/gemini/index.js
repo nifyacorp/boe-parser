@@ -23,13 +23,13 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
       return {
         matches: [],
         metadata: {
-          model_used: "gemini-2.0-pro-exp-02-05",
+          model_used: "gemini-2.0-flash-lite",
           no_content_reason: "No BOE items available for analysis"
         }
       };
     }
     
-    logger.info('Starting BOE analysis with Gemini 2.0 Pro (1M context)', {
+    logger.info('Starting BOE analysis with Gemini 2.0 Flash Lite', {
       reqId,
       contentSize: {
         itemCount: boeItems.length,
@@ -38,10 +38,10 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
       }
     });
 
-    // Get the Gemini model
+    // Get the Gemini model - using flash-lite instead of pro to avoid rate limits
     const genAI = getGeminiClient();
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-pro-exp-02-05",
+      model: "gemini-2.0-flash-lite", // Changed from gemini-2.0-pro-exp-02-05 to avoid rate limiting
     });
     
     // Configuration for structured output
@@ -114,13 +114,40 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
     }, 'BOE items structure before sending to Gemini');
     
     // Create a more focused prompt with raw BOE data
+    // First, try to filter items related to the query to focus on potentially relevant items
+    const keywords = prompt.toLowerCase().split(' ');
+    
+    // Filter items that might be related to the prompt (based on title content)
+    const filteredItems = boeItems.filter(item => {
+      if (!item.title) return false;
+      const title = item.title.toLowerCase();
+      return keywords.some(keyword => {
+        // Only use keywords with length >= 5 to avoid common words
+        return keyword.length >= 5 && title.includes(keyword);
+      });
+    });
+    
+    // Use filtered items if we have some, otherwise use a limited subset of all items
+    let selectedItems = filteredItems.length > 0 ? filteredItems : boeItems;
+    
+    // Further limit items to avoid exceeding token limits
+    const limitedBoeItems = selectedItems.length > 50 ? selectedItems.slice(0, 50) : selectedItems;
+    
+    logger.info({
+      reqId,
+      originalItemCount: boeItems.length,
+      filteredItemCount: filteredItems.length,
+      finalItemCount: limitedBoeItems.length,
+      keywords: keywords.filter(k => k.length >= 5)
+    }, 'Filtered and limited BOE items for Gemini analysis');
+    
     const rawDataPrompt = `
     Estás analizando datos del Boletín Oficial del Estado (BOE) para la siguiente consulta:
     
     "${prompt}"
     
-    DATOS DEL BOE (${boeItems.length} disposiciones):
-    ${JSON.stringify(boeItems, null, 2)}
+    DATOS DEL BOE (mostrando ${limitedBoeItems.length} de ${boeItems.length} disposiciones):
+    ${JSON.stringify(limitedBoeItems, null, 2)}
     
     INSTRUCCIONES IMPORTANTES:
     1. Analiza cuidadosamente los datos del BOE proporcionados
@@ -155,7 +182,7 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
       // Log attempt to process with Gemini
       logger.info({
         reqId,
-        model: "gemini-2.0-pro-exp-02-05",
+        model: "gemini-2.0-flash-lite",
         promptLength: prompt.length,
         itemsCount: boeItems.length
       }, 'Sending request to Gemini API');

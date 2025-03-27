@@ -112,7 +112,7 @@ export async function publishResults(payload) {
         processing_time_ms: payload.metadata?.processing_time_ms || 0,
         total_items_processed: payload.metadata?.total_items_processed || 0,
         total_matches: matches.length,
-        model_used: payload.metadata?.model_used || "gemini-2.0-pro-exp-02-05",
+        model_used: payload.metadata?.model_used || "gemini-2.0-flash-lite",
         status: payload.metadata?.status || 'success',
         error: null
       }
