@@ -105,8 +105,49 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
       ],
     });
     
-    // Prepare the BOE content
-    const inputMessage = JSON.stringify(boeItems);
+    // Prepare the BOE content - send raw data as is
+    // First, log the structure of the items we're sending to Gemini
+    logger.info({
+      reqId, 
+      itemsCount: boeItems.length,
+      sampleItem: boeItems.length > 0 ? JSON.stringify(boeItems[0]).substring(0, 200) : 'No items'
+    }, 'BOE items structure before sending to Gemini');
+    
+    // Create a more focused prompt with raw BOE data
+    const rawDataPrompt = `
+    Estás analizando datos del Boletín Oficial del Estado (BOE) para la siguiente consulta:
+    
+    "${prompt}"
+    
+    DATOS DEL BOE (${boeItems.length} disposiciones):
+    ${JSON.stringify(boeItems, null, 2)}
+    
+    INSTRUCCIONES IMPORTANTES:
+    1. Analiza cuidadosamente los datos del BOE proporcionados
+    2. Encuentra disposiciones relevantes para la consulta del usuario
+    3. Asigna una puntuación de relevancia (0-100) a cada resultado
+    4. Devuelve SOLO las disposiciones con relevancia > 70
+    5. Si no hay resultados relevantes, devuelve un array vacío
+    
+    FORMATO DE RESPUESTA:
+    Responde ÚNICAMENTE con JSON válido con esta estructura:
+    
+    {
+      "matches": [
+        {
+          "document_type": "TIPO_DOCUMENTO",
+          "title": "TÍTULO_ORIGINAL_DEL_BOE",
+          "notification_title": "TÍTULO_OPTIMIZADO_PARA_NOTIFICACIÓN",
+          "issuing_body": "ORGANISMO_EMISOR",
+          "summary": "RESUMEN_BREVE",
+          "relevance_score": PUNTUACIÓN_NUMÉRICA,
+          "links": {
+            "html": "URL_HTML",
+            "pdf": "URL_PDF"
+          }
+        }
+      ]
+    }`;
     
     // Send the message and get the response
     let jsonResponse;
@@ -119,7 +160,8 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
         itemsCount: boeItems.length
       }, 'Sending request to Gemini API');
 
-      const result = await chatSession.sendMessage(inputMessage);
+      // Use the raw data prompt instead of just sending the BOE items
+      const result = await chatSession.sendMessage(rawDataPrompt);
       const responseText = result.response.text();
       
       // Log the raw response for debugging

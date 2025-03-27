@@ -174,6 +174,14 @@ app.post('/test-analyze', async (req, res) => {
     logger.info({ reqId, date }, 'Fetching BOE content for test');
     const boeContent = await scrapeWebsite(date, reqId);
     
+    // Log the number of BOE items found
+    logger.info({ 
+      reqId, 
+      itemCount: boeContent.items.length,
+      boeInfo: boeContent.boeInfo,
+      firstFewItems: boeContent.items.slice(0, 3).map(item => item.title)
+    }, 'BOE content fetched successfully');
+    
     if (!boeContent) {
       return res.status(500).json({ 
         error: 'Failed to fetch BOE content',
@@ -316,8 +324,9 @@ app.post('/analyze-text', async (req, res) => {
     }
 
     // Step 1: Fetch and parse BOE content (do this once for all prompts)
-    logger.debug({ reqId }, 'Fetching BOE content');
-    const boeContent = await scrapeWebsite(null, reqId);
+    const date = req.body.date || null;
+    logger.debug({ reqId, date }, 'Fetching BOE content');
+    const boeContent = await scrapeWebsite(date, reqId);
     
     if (!boeContent) {
       logger.error({ reqId }, 'Failed to fetch BOE content');

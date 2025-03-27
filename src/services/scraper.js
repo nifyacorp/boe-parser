@@ -110,10 +110,24 @@ function getMonthNumber(spanishMonth) {
   return months[spanishMonth.toLowerCase()] || '01';
 }
 
-export async function scrapeWebsite(url, reqId) {
+export async function scrapeWebsite(date, reqId) {
   try {
-    // Override the input URL with BOE URL
-    url = getYesterdayBOEUrl();
+    // If a specific date is provided, use it; otherwise use yesterday
+    let url;
+    if (date) {
+      const dateParts = date.split('-');
+      if (dateParts.length === 3) {
+        const [year, month, day] = dateParts;
+        url = `https://www.boe.es/boe/dias/${year}/${month}/${day}/`;
+        logger.info({ reqId, date, url }, 'Using provided date for BOE fetch');
+      } else {
+        url = getYesterdayBOEUrl();
+        logger.info({ reqId, url }, 'Invalid date format, using yesterday instead');
+      }
+    } else {
+      url = getYesterdayBOEUrl();
+      logger.info({ reqId, url }, 'No date provided, using yesterday');
+    }
     
     logger.debug({ reqId, url }, 'Starting BOE fetch');
     
