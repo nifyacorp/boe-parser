@@ -17,6 +17,18 @@ function getGeminiClient() {
 
 export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload = {}) {
   try {
+    // Check if there are BOE items to analyze
+    if (!boeItems || boeItems.length === 0) {
+      logger.warn({ reqId, prompt }, 'No BOE items to analyze. Returning empty result set.');
+      return {
+        matches: [],
+        metadata: {
+          model_used: "gemini-2.0-pro-exp-02-05",
+          no_content_reason: "No BOE items available for analysis"
+        }
+      };
+    }
+    
     logger.info('Starting BOE analysis with Gemini 2.0 Pro (1M context)', {
       reqId,
       contentSize: {
@@ -78,6 +90,8 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
     }
     
     Si no hay resultados relevantes, devuelve un array "matches" vacío. Incluye solo documentos realmente relevantes.
+    
+    IMPORTANTE: Si no encuentras ningún documento realmente relevante, es mejor devolver un array vacío que forzar coincidencias con baja relevancia.
     `;
     
     // Start a chat session with history
@@ -95,61 +109,86 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
     const inputMessage = JSON.stringify(boeItems);
     
     // Send the message and get the response
-    const result = await chatSession.sendMessage(inputMessage);
-    const responseText = result.response.text();
-    
-    // Try to parse the JSON response
-    let jsonResponse;
     try {
-      // Extract JSON from response (in case there's any text wrapping it)
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      const jsonString = jsonMatch ? jsonMatch[0] : responseText;
+      const result = await chatSession.sendMessage(inputMessage);
+      const responseText = result.response.text();
       
-      jsonResponse = JSON.parse(jsonString);
+      // Log the raw response for debugging
+      logger.debug({
+        reqId,
+        rawResponse: responseText.substring(0, 1000) + (responseText.length > 1000 ? '...' : '')
+      }, 'Gemini raw response');
       
-      // Ensure the response has the correct structure
-      if (!jsonResponse.matches) {
+      // Try to parse the JSON response
+      let jsonResponse;
+      try {
+        // Extract JSON from response (in case there's any text wrapping it)
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        const jsonString = jsonMatch ? jsonMatch[0] : responseText;
+        
+        jsonResponse = JSON.parse(jsonString);
+        
+        // Ensure the response has the correct structure
+        if (!jsonResponse.matches) {
+          logger.warn({
+            reqId,
+            responseStructure: Object.keys(jsonResponse).join(',')
+          }, 'Gemini response missing matches array');
+          
+          jsonResponse = { matches: [] };
+        }
+        
+        // Validate each match
+        jsonResponse.matches = jsonResponse.matches.map(match => {
+          // Ensure title length <= 80 chars
+          if (match.title && match.title.length > 80) {
+            match.title = match.title.substring(0, 77) + '...';
+          }
+          
+          // Ensure notification_title length <= 80 chars
+          if (match.notification_title && match.notification_title.length > 80) {
+            match.notification_title = match.notification_title.substring(0, 77) + '...';
+          } else if (!match.notification_title && match.title) {
+            // Create notification_title from title if missing
+            match.notification_title = match.title.length > 80 ? 
+              match.title.substring(0, 77) + '...' : match.title;
+          }
+          
+          // Ensure summary length <= 200 chars
+          if (match.summary && match.summary.length > 200) {
+            match.summary = match.summary.substring(0, 197) + '...';
+          }
+          
+          // Ensure relevance_score is a number
+          if (typeof match.relevance_score !== 'number') {
+            match.relevance_score = parseFloat(match.relevance_score) || 75;
+          }
+          
+          return match;
+        });
+        
+      } catch (error) {
+        logger.error({
+          reqId,
+          error: error.message,
+          responseText: responseText.substring(0, 500) + '...'
+        }, 'Failed to parse Gemini response as JSON');
+        
+        // Return empty matches if parsing fails
         jsonResponse = { matches: [] };
       }
-      
-      // Validate each match
-      jsonResponse.matches = jsonResponse.matches.map(match => {
-        // Ensure title length <= 80 chars
-        if (match.title && match.title.length > 80) {
-          match.title = match.title.substring(0, 77) + '...';
-        }
-        
-        // Ensure notification_title length <= 80 chars
-        if (match.notification_title && match.notification_title.length > 80) {
-          match.notification_title = match.notification_title.substring(0, 77) + '...';
-        } else if (!match.notification_title && match.title) {
-          // Create notification_title from title if missing
-          match.notification_title = match.title.length > 80 ? 
-            match.title.substring(0, 77) + '...' : match.title;
-        }
-        
-        // Ensure summary length <= 200 chars
-        if (match.summary && match.summary.length > 200) {
-          match.summary = match.summary.substring(0, 197) + '...';
-        }
-        
-        // Ensure relevance_score is a number
-        if (typeof match.relevance_score !== 'number') {
-          match.relevance_score = parseFloat(match.relevance_score) || 75;
-        }
-        
-        return match;
-      });
-      
-    } catch (error) {
-      logger.error('Failed to parse Gemini response as JSON', {
+    } catch (geminiError) {
+      logger.error({
         reqId,
-        error: error.message,
-        responseText: responseText.substring(0, 500) + '...'
-      });
+        error: geminiError.message,
+        stack: geminiError.stack
+      }, 'Gemini analysis failed');
       
-      // Return empty matches if parsing fails
-      jsonResponse = { matches: [] };
+      // Return empty matches if Gemini fails completely
+      jsonResponse = { 
+        matches: [],
+        error: geminiError.message
+      };
     }
     
     // Log matches count

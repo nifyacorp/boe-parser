@@ -61,6 +61,143 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', version: process.env.VERSION || '1.0.0' });
 });
 
+// Test endpoint to trigger the BOE parser process and return diagnostic information
+app.post('/test-analyze', async (req, res) => {
+  const reqId = req.id;
+  const startTime = Date.now();
+  
+  try {
+    logger.info({ reqId }, 'Test analyze endpoint triggered');
+    
+    // Get parameters from request or use defaults
+    const texts = req.body.texts || ["dime todas las disposiciones de personal"];
+    const userId = req.body.userId || "65c6074d-dbc4-4091-8e45-b6aecffd9ab9";
+    const subscriptionId = req.body.subscriptionId || "bbcde7bb-bc04-4a0b-8c47-01682a31cc15";
+    const date = req.body.date || new Date().toISOString().split('T')[0];
+    
+    // Step 1: Fetch and parse BOE content
+    logger.info({ reqId, date }, 'Fetching BOE content for test');
+    const boeContent = await scrapeWebsite(date, reqId);
+    
+    if (!boeContent) {
+      return res.status(500).json({ 
+        error: 'Failed to fetch BOE content',
+        reqId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Step 2: Process each text prompt
+    logger.info({ reqId, promptCount: texts.length }, 'Processing test prompts');
+    
+    const results = [];
+    const errors = [];
+    
+    for (let i = 0; i < texts.length; i++) {
+      try {
+        // Process the input text
+        const text = texts[i];
+        logger.info({ reqId, promptIndex: i, text }, 'Processing test input text');
+        const cleanText = processText(text);
+        
+        // Analyze with Gemini
+        logger.info({ reqId, promptIndex: i }, 'Starting Gemini analysis');
+        const analysis = await analyzeWithGemini(boeContent.items, cleanText, reqId, {
+          metadata: {
+            user_id: userId,
+            subscription_id: subscriptionId
+          }
+        });
+        
+        results.push({
+          prompt: text,
+          cleanText,
+          matches: analysis.matches,
+          metadata: analysis.metadata
+        });
+      } catch (promptError) {
+        logger.error({ 
+          reqId, 
+          promptIndex: i, 
+          error: promptError.message,
+          stack: promptError.stack 
+        }, 'Error processing test prompt');
+        
+        errors.push({
+          promptIndex: i,
+          text: texts[i],
+          error: promptError.message
+        });
+      }
+    }
+    
+    // Prepare diagnostic response
+    const processingTime = Date.now() - startTime;
+    
+    const diagnosticResponse = {
+      reqId,
+      timestamp: new Date().toISOString(),
+      boe_info: boeContent.boeInfo,
+      processing_time_ms: processingTime,
+      input: {
+        texts,
+        userId,
+        subscriptionId,
+        date
+      },
+      boe_items_count: boeContent.items ? boeContent.items.length : 0,
+      results_count: results.length,
+      errors_count: errors.length,
+      results,
+      errors,
+      success: errors.length === 0
+    };
+    
+    // Optional: Publish results to PubSub for end-to-end testing
+    if (req.body.publishToPubSub === true) {
+      try {
+        const publishPayload = {
+          trace_id: reqId,
+          request: {
+            texts,
+            user_id: userId,
+            subscription_id: subscriptionId
+          },
+          results: {
+            query_date: date,
+            matches: results.flatMap(r => r.matches.map(m => ({
+              ...m,
+              prompt: r.prompt
+            })))
+          },
+          processor_type: "boe",
+          metadata: {
+            processing_time_ms: processingTime,
+            total_items_processed: boeContent.items ? boeContent.items.length : 0
+          }
+        };
+        
+        const messageId = await publishResults(publishPayload);
+        diagnosticResponse.pubsub_message_id = messageId;
+        logger.info({ reqId, messageId }, 'Test results published to PubSub');
+      } catch (pubsubError) {
+        diagnosticResponse.pubsub_error = pubsubError.message;
+        logger.error({ reqId, error: pubsubError.message }, 'Failed to publish test results to PubSub');
+      }
+    }
+    
+    res.json(diagnosticResponse);
+    
+  } catch (error) {
+    logger.error({ reqId, error: error.message, stack: error.stack }, 'Test analyze endpoint error');
+    res.status(500).json({ 
+      error: error.message, 
+      reqId,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.post('/analyze-text', async (req, res) => {
   const reqId = req.id;
   const startTime = Date.now();

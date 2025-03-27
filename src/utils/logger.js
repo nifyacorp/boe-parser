@@ -18,7 +18,13 @@ function formatObject(obj) {
   }
   
   if (typeof obj === 'object' && obj !== null) {
-    return JSON.stringify(obj, null, 2);
+    // Check if it's an array that should be output as a single line
+    if (Array.isArray(obj) && obj.every(item => typeof item === 'string' || typeof item === 'number')) {
+      return JSON.stringify(obj);
+    }
+    
+    // For regular objects, return a properly formatted string on one line
+    return JSON.stringify(obj);
   }
   
   return obj;
@@ -29,9 +35,8 @@ function formatMessage(level, message, data = {}) {
   let formattedData = '';
   
   if (Object.keys(data).length > 0) {
-    formattedData = '\n' + Object.entries(data)
-      .map(([key, value]) => `  ${key}: ${formatObject(value)}`)
-      .join('\n');
+    // Format the data object as a single JSON string instead of line-by-line
+    formattedData = ' ' + JSON.stringify(data);
   }
     
   return `[${timestamp}] ${level.toUpperCase()}: ${message}${formattedData}`;
