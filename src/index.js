@@ -12,14 +12,35 @@ import { getApiDocs } from './utils/apiDocs.js';
 // Load environment variables
 dotenv.config();
 
+import { getSecret } from './utils/secrets.js';
+
 // Check for required environment variables at startup
-function checkRequiredEnvVars() {
+async function checkRequiredEnvVars() {
   const requiredVars = [
     'GEMINI_API_KEY',
     'BOE_API_KEY'
   ];
   
-  const missingVars = requiredVars.filter(varName => !process.env[varName]);
+  const missingVars = [];
+  for (const varName of requiredVars) {
+    if (!process.env[varName]) {
+      // Try to load from Secret Manager
+      try {
+        console.log(`${varName} not found in environment, attempting to load from Secret Manager...`);
+        const secretValue = await getSecret(varName);
+        if (secretValue) {
+          // Cache the value in the environment
+          process.env[varName] = secretValue;
+          console.log(`Successfully loaded ${varName} from Secret Manager`);
+        } else {
+          missingVars.push(varName);
+        }
+      } catch (error) {
+        console.error(`Failed to load ${varName} from Secret Manager: ${error.message}`);
+        missingVars.push(varName);
+      }
+    }
+  }
   
   if (missingVars.length > 0) {
     console.error('ERROR: Missing required environment variables:', missingVars.join(', '));
@@ -39,8 +60,10 @@ function checkRequiredEnvVars() {
   }
 }
 
-// Check environment variables at startup
-checkRequiredEnvVars();
+// Check environment variables at startup (async)
+checkRequiredEnvVars().catch(error => {
+  console.error('Error during environment check:', error.message);
+});
 
 const app = express();
 const port = parseInt(process.env.PORT) || 8080;
@@ -101,14 +124,26 @@ app.get('/check-gemini', async (req, res) => {
     // Get the Gemini client
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     
-    // Get API key from environment
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Get API key from environment or Secret Manager
+    let apiKey = process.env.GEMINI_API_KEY;
+    
+    // If not in environment, try Secret Manager
+    if (!apiKey) {
+      try {
+        logger.info({ reqId }, 'GEMINI_API_KEY not found in environment, attempting to fetch from Secret Manager');
+        apiKey = await getSecret('GEMINI_API_KEY');
+        // Cache for future use
+        process.env.GEMINI_API_KEY = apiKey;
+      } catch (secretError) {
+        logger.error({ reqId, error: secretError.message }, 'Failed to fetch GEMINI_API_KEY from Secret Manager');
+      }
+    }
     
     if (!apiKey) {
-      logger.error({ reqId }, 'GEMINI_API_KEY environment variable is not set');
+      logger.error({ reqId }, 'GEMINI_API_KEY not available in environment or Secret Manager');
       return res.status(500).json({ 
         status: 'ERROR', 
-        error: 'GEMINI_API_KEY environment variable is not set' 
+        error: 'GEMINI_API_KEY not available in environment or Secret Manager' 
       });
     }
     

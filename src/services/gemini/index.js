@@ -1,15 +1,28 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { logger } from '../../utils/logger.js';
+import { getSecret } from '../../utils/secrets.js';
 
 // Initialize the Gemini API client
 let genAIClient;
 
-function getGeminiClient() {
+async function getGeminiClient() {
   if (!genAIClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Try to get API key from environment variable first
+    let apiKey = process.env.GEMINI_API_KEY;
+    
+    // If not found in env vars, try to fetch from Secret Manager
     if (!apiKey) {
-      throw new Error('GEMINI_API_KEY environment variable is not set');
+      try {
+        logger.info('GEMINI_API_KEY not found in environment, attempting to fetch from Secret Manager');
+        apiKey = await getSecret('GEMINI_API_KEY');
+        // Cache the API key in memory to avoid repeated Secret Manager calls
+        process.env.GEMINI_API_KEY = apiKey;
+      } catch (error) {
+        logger.error({ error: error.message }, 'Failed to fetch GEMINI_API_KEY from Secret Manager');
+        throw new Error('GEMINI_API_KEY not available in environment or Secret Manager');
+      }
     }
+    
     genAIClient = new GoogleGenerativeAI(apiKey);
   }
   return genAIClient;
@@ -39,7 +52,7 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
     }, 'Starting BOE analysis with Gemini 2.0 Flash Lite');
 
     // Get the Gemini model - using flash-lite instead of pro to avoid rate limits
-    const genAI = getGeminiClient();
+    const genAI = await getGeminiClient();
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-flash-lite", // Changed from gemini-2.0-pro-exp-02-05 to avoid rate limiting
     });
