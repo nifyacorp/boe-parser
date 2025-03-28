@@ -29,14 +29,14 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
       };
     }
     
-    logger.info('Starting BOE analysis with Gemini 2.0 Flash Lite', {
+    logger.info({
       reqId,
       contentSize: {
         itemCount: boeItems.length,
         contentSize: JSON.stringify(boeItems).length,
         querySize: prompt.length
       }
-    });
+    }, 'Starting BOE analysis with Gemini 2.0 Flash Lite');
 
     // Get the Gemini model - using flash-lite instead of pro to avoid rate limits
     const genAI = getGeminiClient();
@@ -320,11 +320,11 @@ export async function analyzeWithGemini(boeItems, prompt, reqId, requestPayload 
     };
     
   } catch (error) {
-    logger.error('Gemini analysis failed', {
+    logger.error({
       reqId,
       error: error.message,
       stack: error.stack
-    });
+    }, 'Gemini analysis failed');
     
     // Return empty result in case of error
     return {
