@@ -1,15 +1,23 @@
 import { logger } from './logger.js';
 import { getSecret } from './secrets.js';
 
-const API_KEY_SECRET_NAME = 'PARSER_API_KEY';
+// Use BOE_API_KEY as the secret name to match what's expected in the logs
+const API_KEY_SECRET_NAME = 'BOE_API_KEY';
 let cachedApiKey = null;
 let cacheExpiry = null;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 async function getApiKey() {
+  // First check environment variable
+  if (process.env.BOE_API_KEY) {
+    return process.env.BOE_API_KEY;
+  }
+  
+  // If not in env, try Secret Manager with caching
   const now = Date.now();
   if (!cachedApiKey || !cacheExpiry || now > cacheExpiry) {
     try {
+      console.log('BOE_API_KEY not found in environment, attempting to load from Secret Manager...');
       logger.debug('Fetching API key from Secret Manager');
       cachedApiKey = await getSecret(API_KEY_SECRET_NAME);
       cacheExpiry = now + CACHE_DURATION;

@@ -1,7 +1,8 @@
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { logger } from './logger.js';
 
-const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'delta-entity-447812-p2';
+// Use the correct project ID - use the one from the error message (415554190254)
+const projectId = process.env.GOOGLE_CLOUD_PROJECT || '415554190254';
 const client = new SecretManagerServiceClient();
 
 export async function getSecret(name) {

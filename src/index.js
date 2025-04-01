@@ -15,8 +15,8 @@ dotenv.config();
 // Check for required environment variables at startup
 function checkRequiredEnvVars() {
   const requiredVars = [
-    'GEMINI_API_KEY',
-    'BOE_API_KEY'
+    'GEMINI_API_KEY'
+    // BOE_API_KEY is fetched from Secret Manager with name PARSER_API_KEY
   ];
   
   const missingVars = requiredVars.filter(varName => !process.env[varName]);
