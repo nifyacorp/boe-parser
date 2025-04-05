@@ -1,62 +1,47 @@
 /**
- * Text processing utilities
+ * Text processing utilities for parser
  */
-import logger from '../../utils/logger.js';
-import { createServiceError } from '../../utils/errors/AppError.js';
 
 /**
- * Clean and normalize text
- * @param {string} text - Text to process
+ * Clean and normalize text content
+ * - Trim whitespace
+ * - Remove excessive newlines/spaces
+ * @param {string} text - Input text
  * @returns {string} - Processed text
  */
-export function cleanText(text) {
-  if (!text) return '';
-  
-  return text
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Process text for analysis
- * @param {string} text - Text to process
- * @returns {string} - Processed text
- */
-export function processText(text) {
+export function processTextContent(text) {
+  if (typeof text !== 'string' || !text) {
+    return '';
+  }
   try {
-    if (!text) {
-      return '';
-    }
-    
-    // Normalize text
-    return cleanText(text);
+    // Trim leading/trailing whitespace
+    let processed = text.trim();
+    // Replace multiple whitespace characters (including newlines) with a single space
+    processed = processed.replace(/\s+/g, ' ');
+    return processed;
   } catch (error) {
-    logger.error({ error }, 'Error processing text');
-    throw createServiceError(`Failed to process text: ${error.message}`);
+    // Replaced logger.error with console.error
+    console.error('Error processing text content:', { error: error.message, inputTextStart: text.substring(0, 100) });
+    return text; // Return original text on error
   }
 }
 
 /**
- * Normalize an array of text prompts
- * @param {Array|string} texts - Text or array of texts to process
- * @returns {Array} - Array of processed texts
+ * Normalize prompts array
+ * @param {Array|string} prompts - Input prompts
+ * @returns {Array<string>} - Normalized array of non-empty prompts
  */
-export function normalizePrompts(texts) {
+export function normalizePrompts(prompts) {
   try {
-    // Handle single string
-    if (typeof texts === 'string') {
-      return [processText(texts)].filter(Boolean);
+    if (Array.isArray(prompts)) {
+      return prompts.map(p => String(p).trim()).filter(p => p.length > 0);
+    } else if (typeof prompts === 'string' && prompts.trim().length > 0) {
+      return [prompts.trim()];
     }
-    
-    // Handle array
-    if (Array.isArray(texts)) {
-      return texts.map(processText).filter(Boolean);
-    }
-    
-    // Default empty array
     return [];
   } catch (error) {
-    logger.error({ error }, 'Error normalizing text prompts');
-    throw createServiceError(`Failed to normalize prompts: ${error.message}`);
+    // Replaced logger.error with console.error
+    console.error('Error normalizing text prompts:', { error: error.message, inputPrompts: prompts });
+    return []; // Return empty array on error
   }
 }

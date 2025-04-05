@@ -1,28 +1,32 @@
+/**
+ * Secret Manager utility
+ */
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
-import { logger } from './logger.js';
+// Removed logger import
+import config from '../config/config.js';
 
-// Use the correct project ID - use the one from the error message (415554190254)
-const projectId = process.env.GOOGLE_CLOUD_PROJECT || '415554190254';
-const client = new SecretManagerServiceClient();
+let secretsCache = {};
+let client;
 
-export async function getSecret(name) {
+function getClient() {
+  if (!client) {
+    client = new SecretManagerServiceClient();
+  }
+  return client;
+}
+
+async function accessSecretVersion(secretName) {
   try {
-    if (!projectId) {
-      throw new Error('GOOGLE_CLOUD_PROJECT environment variable is not set');
-    }
-
-    const [version] = await client.accessSecretVersion({
-      name: `projects/${projectId}/secrets/${name}/versions/latest`,
-    });
-
-    return version.payload.data.toString();
+    const name = `projects/${config.gcp.projectId}/secrets/${secretName}/versions/latest`;
+    const [version] = await getClient().accessSecretVersion({ name });
+    return version.payload.data.toString('utf8');
   } catch (error) {
-    logger.error({
-      error: error.message,
-      secretName: name,
-      projectId,
-      stack: error.stack
-    }, 'Error fetching secret');
-    throw new Error(`Failed to fetch secret: ${error.message}`);
+    // Replaced logger.error with console.error
+    console.error(`Failed to access secret: ${secretName}`, { error });
+    throw error; // Re-throw after logging
   }
 }
+
+// Add functions to load secrets into cache, etc.
+
+export { accessSecretVersion };

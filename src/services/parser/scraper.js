@@ -179,6 +179,12 @@ export async function fetchBOEContent(date, requestId) {
   }
 }
 
+// Constants
+const BOE_BASE_URL = 'https://www.boe.es';
+const SUMMARY_ENDPOINT = '/diario_boe/xml.php?id=BOE-S-';
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000; // ms
+
 /**
  * Fetch BOE summary XML with retries
  * @param {string} date - Date in YYYYMMDD format

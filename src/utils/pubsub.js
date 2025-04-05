@@ -3,8 +3,8 @@
  */
 import { PubSub } from '@google-cloud/pubsub';
 import { randomUUID } from 'crypto';
-import logger from './logger.js';
 import config from '../config/config.js';
+import { createPubSubError } from './errors/AppError.js';
 
 // Create PubSub client
 const pubsub = new PubSub({
@@ -16,7 +16,7 @@ const MAIN_TOPIC = config.services.pubsub.topicName;
 const DLQ_TOPIC = `${MAIN_TOPIC}-dlq`;
 
 // Log PubSub configuration on module import
-logger.info({
+console.log({
   mainTopic: MAIN_TOPIC,
   dlqTopic: DLQ_TOPIC,
   projectId: config.services.pubsub.projectId || 'local',
@@ -133,7 +133,7 @@ export async function publishResults(payload) {
     };
     
     // Log message structure (debug level)
-    logger.debug({
+    console.log({
       trace_id: traceId,
       subscription_id: message.request.subscription_id,
       user_id: message.request.user_id,
@@ -144,7 +144,7 @@ export async function publishResults(payload) {
     const dataBuffer = Buffer.from(JSON.stringify(message));
     const messageId = await pubsub.topic(MAIN_TOPIC).publish(dataBuffer);
     
-    logger.info({
+    console.log({
       messageId,
       topicName: MAIN_TOPIC,
       traceId,
@@ -152,7 +152,7 @@ export async function publishResults(payload) {
 
     return messageId;
   } catch (error) {
-    logger.error({
+    console.error({
       error,
       topicName: MAIN_TOPIC,
     }, 'Failed to publish results to PubSub');
@@ -197,7 +197,7 @@ export async function publishError(error, req) {
     const dataBuffer = Buffer.from(JSON.stringify(errorMessage));
     const messageId = await pubsub.topic(DLQ_TOPIC).publish(dataBuffer);
     
-    logger.info({
+    console.log({
       messageId,
       topicName: DLQ_TOPIC,
       traceId: errorMessage.trace_id,
@@ -205,7 +205,7 @@ export async function publishError(error, req) {
 
     return messageId;
   } catch (pubsubError) {
-    logger.error({
+    console.error({
       error: pubsubError,
       originalError: error.message,
     }, 'Failed to publish error to PubSub');
@@ -234,14 +234,14 @@ async function publishToDLQ(originalPayload, error) {
     const dataBuffer = Buffer.from(JSON.stringify(dlqMessage));
     const messageId = await pubsub.topic(DLQ_TOPIC).publish(dataBuffer);
     
-    logger.info({
+    console.log({
       messageId,
       topicName: DLQ_TOPIC,
     }, 'Published failed message to DLQ');
 
     return messageId;
   } catch (dlqError) {
-    logger.error({
+    console.error({
       error: dlqError,
       originalError: error.message,
     }, 'Failed to publish to DLQ');

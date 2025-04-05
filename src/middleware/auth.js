@@ -1,9 +1,59 @@
 /**
  * Authentication middleware
  */
-import logger from '../utils/logger.js';
 import config from '../config/config.js';
 import { createAuthenticationError } from '../utils/errors/AppError.js';
+
+// Cache for the API key to avoid repeated Secret Manager lookups
+let cachedApiKey = null;
+let isFetchingApiKey = false;
+
+/**
+ * Fetch API key from Secret Manager or environment variable
+ * Caches the key after the first successful fetch.
+ */
+async function getApiKey() {
+  if (cachedApiKey) {
+    return cachedApiKey;
+  }
+
+  // Use API_KEY from environment if available
+  if (config.auth.apiKey) {
+    // console.log('Using API key from environment variable/config.');
+    cachedApiKey = config.auth.apiKey;
+    return cachedApiKey;
+  }
+
+  // Avoid concurrent fetches if using Secret Manager
+  if (isFetchingApiKey) {
+    // Wait for the ongoing fetch to complete
+    await new Promise(resolve => setTimeout(resolve, 100)); // Simple wait
+    return getApiKey(); // Retry getting the cached key
+  }
+
+  // Fetch from Secret Manager if secretName is configured
+  if (config.auth.apiKeySecretName) {
+    isFetchingApiKey = true;
+    try {
+      // console.log('Fetching API key from Secret Manager...');
+      const { accessSecretVersion } = await import('../utils/secrets.js');
+      cachedApiKey = await accessSecretVersion(config.auth.apiKeySecretName);
+      // console.log('API key fetched and cached successfully from Secret Manager.');
+      isFetchingApiKey = false;
+      return cachedApiKey;
+    } catch (error) {
+      isFetchingApiKey = false;
+      console.error(`Failed to fetch API key from Secret Manager (Secret: ${config.auth.apiKeySecretName})`, { error });
+      // Depending on policy, either throw or return null/undefined
+      // Returning null here means auth will fail later
+      return null;
+    }
+  }
+
+  // If no key is available from env or secret manager
+  console.error('API key is not configured in environment variables (API_KEY) or Secret Manager (API_KEY_SECRET_NAME)');
+  return null;
+}
 
 /**
  * Validate API key middleware
@@ -11,48 +61,47 @@ import { createAuthenticationError } from '../utils/errors/AppError.js';
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function
  */
-export function validateApiKey(req, res, next) {
+export async function validateApiKey(req, res, next) {
+  const reqId = req.id; // Use request ID for logging context
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader) {
-      logger.warn({ requestId: req.id }, 'Missing Authorization header');
-      throw createAuthenticationError('Authorization header is required');
+      console.warn(`Missing Authorization header - Request ID: ${reqId}`);
+      return next(createAuthenticationError('Authorization header is required'));
     }
 
     const [type, token] = authHeader.split(' ');
 
     if (type !== 'Bearer') {
-      logger.warn({ requestId: req.id }, 'Invalid authorization type');
-      throw createAuthenticationError('Bearer token is required');
+      console.warn(`Invalid authorization type - Request ID: ${reqId}`);
+      return next(createAuthenticationError('Bearer token is required'));
     }
 
     if (!token) {
-      logger.warn({ requestId: req.id }, 'Missing token');
-      throw createAuthenticationError('API key is required');
-    }
-    
-    // Compare with configured API key
-    const validApiKey = config.auth.apiKey;
-    
-    if (!validApiKey) {
-      logger.error({ requestId: req.id }, 'API key not configured');
-      throw createAuthenticationError('Service configuration error');
-    }
-    
-    if (token !== validApiKey) {
-      logger.warn({ 
-        requestId: req.id,
-        providedKeyLength: token.length,
-        expectedKeyLength: validApiKey.length,
-        keyMismatch: true
-      }, 'Invalid API key');
-      throw createAuthenticationError('Invalid API key');
+      console.warn(`Missing token - Request ID: ${reqId}`);
+      return next(createAuthenticationError('API key is required'));
     }
 
+    // Get the valid API key (handles caching)
+    const validApiKey = await getApiKey();
+
+    if (!validApiKey) {
+      console.error(`Service configuration error: API key could not be loaded - Request ID: ${reqId}`);
+      // Do not expose details about key loading failure
+      return next(createAuthenticationError('Service configuration error', { statusCode: 500 }));
+    }
+
+    if (token !== validApiKey) {
+      console.warn(`Invalid API key provided - Request ID: ${reqId}`);
+      return next(createAuthenticationError('Invalid API key'));
+    }
+
+    // Key is valid
     next();
   } catch (error) {
-    // Pass error to global error handler
-    next(error);
+    // Catch errors during API key fetching or validation
+    console.error(`Error during API key validation - Request ID: ${reqId}`, { error: error.message });
+    next(createAuthenticationError('Authentication failed', { cause: error }));
   }
 }
