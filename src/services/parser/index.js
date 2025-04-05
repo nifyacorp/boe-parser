@@ -2,7 +2,7 @@
  * BOE Parser Service - Orchestrates fetching and parsing
  */
 import { fetchBOESummary, parseBOEXML } from './scraper.js';
-import { createScraperError } from '../../utils/errors/AppError.js';
+import { createServiceError } from '../../utils/errors/AppError.js';
 
 /**
  * Fetch and parse BOE content for a specific date or range
@@ -36,12 +36,13 @@ export async function parseBOE(options = {}) {
   } catch (error) {
     console.error(`Error in BOE parsing process - Request ID: ${requestId}, Date: ${targetDate}, Error:`, error);
 
-    // Rethrow or handle specific errors as needed
-    if (error.code === 'SCRAPER_ERROR') {
-      throw error; // Propagate scraper-specific errors
-    } else {
-      // Wrap other errors
-      throw createScraperError(`BOE parsing failed for date ${targetDate}`, {
+    // Rethrow specific AppErrors (like ExternalApiError from fetch or ServiceError from parse)
+    if (error instanceof Error && error.code && error.isOperational) { // Check if it's likely an AppError
+      throw error; // Propagate the specific error
+    }
+    // Wrap other unexpected errors as a generic ServiceError
+    else {
+      throw createServiceError(`BOE parsing orchestration failed for date ${targetDate}`, {
         cause: error,
         date: targetDate,
         requestId

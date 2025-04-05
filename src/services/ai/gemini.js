@@ -5,9 +5,8 @@ import { getGeminiModel } from './client.js';
 import config from '../../config/config.js';
 import { createSystemPrompt, createContentPrompt } from './prompts/gemini.js';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
-import { systemPrompt, formatPrompt } from './prompts/geminiPrompt.js';
-import { createAIServiceError } from '../../utils/errors/AppError.js';
-import { parseAIResponse } from './responseParser.js';
+import { systemPrompt, formatPrompt } from './prompts/gemini.js';
+import { createExternalApiError, createServiceError } from '../../utils/errors/AppError.js';
 
 /**
  * Extract keywords from prompt
@@ -49,8 +48,7 @@ function parseGeminiResponse(responseText, requestId) {
         requestId,
         responseText: responseText.substring(0, 500) + (responseText.length > 500 ? '...' : '')
       }, 'No JSON object found in Gemini response');
-      
-      return { matches: [] };
+      throw createServiceError('No JSON object found in Gemini response', { responseTextPreview: responseText.substring(0, 500) });
     }
     
     const jsonString = jsonMatch[0];
@@ -62,7 +60,10 @@ function parseGeminiResponse(responseText, requestId) {
       responseText: responseText.substring(0, 500) + (responseText.length > 500 ? '...' : '')
     }, 'Failed to parse Gemini response');
     
-    return { matches: [] };
+    if (error instanceof Error && error.code && error.isOperational) {
+        throw error;
+    }
+    throw createServiceError('Failed to parse Gemini response', { cause: error, responseTextPreview: responseText.substring(0, 500) });
   }
 }
 
@@ -113,7 +114,7 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
     if (!result.response) {
       // console.error(`Gemini analysis failed: No response object - Request ID: ${requestId}, Full Result:`, result);
       console.error(`Gemini analysis failed: No response object - Request ID: ${requestId}, Full Result:`, result);
-      throw createAIServiceError('Gemini API returned no response object', { code: 'GEMINI_NO_RESPONSE', details: result });
+      throw createExternalApiError('Gemini API returned no response object', { code: 'GEMINI_NO_RESPONSE', details: result, service: 'Gemini' });
     }
 
     const response = result.response;
@@ -121,7 +122,7 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
 
     // console.log(`Gemini raw response received - Request ID: ${requestId}, Text Length: ${responseText.length}`);
 
-    const parsedResult = parseAIResponse(responseText);
+    const parsedResult = parseGeminiResponse(responseText, requestId);
 
     // Add metadata
     parsedResult.metadata = {
@@ -142,24 +143,29 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
     // console.error(`Gemini analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
     console.error(`Gemini analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
 
+    if (error instanceof Error && error.code && error.isOperational) {
+        throw error;
+    }
     // Handle potential API errors (e.g., rate limits, blocked prompts)
     if (error instanceof GoogleGenerativeAI) { // Check specific error types if available
-      throw createAIServiceError(`Gemini API error: ${error.message}`, {
+      throw createExternalApiError(`Gemini API error: ${error.message}`, {
         code: 'GEMINI_API_ERROR',
         status: error.status, // Or relevant error code/status
-        cause: error
+        cause: error,
+        service: 'Gemini'
       });
     } else if (error.finishReason && error.finishReason !== 'STOP') {
       // Handle cases where generation finished due to safety, length, etc.
-      throw createAIServiceError(`Gemini generation finished unexpectedly: ${error.finishReason}`, {
+      throw createExternalApiError(`Gemini generation finished unexpectedly: ${error.finishReason}`, {
         code: 'GEMINI_FINISH_REASON_ERROR',
         details: { finishReason: error.finishReason, safetyRatings: error.safetyRatings },
-        cause: error
+        cause: error,
+        service: 'Gemini'
       });
     }
 
-    // Rethrow other errors or wrap them
-    throw createAIServiceError(`Gemini analysis failed: ${error.message}`, {
+    // Wrap other unexpected errors as ServiceError
+    throw createServiceError(`Gemini analysis failed: ${error.message}`, {
       code: 'GEMINI_ANALYSIS_FAILED',
       cause: error
     });

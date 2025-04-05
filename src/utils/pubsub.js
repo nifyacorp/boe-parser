@@ -4,7 +4,7 @@
 import { PubSub } from '@google-cloud/pubsub';
 import { randomUUID } from 'crypto';
 import config from '../config/config.js';
-import { createPubSubError } from './errors/AppError.js';
+import { createServiceError } from './errors/AppError.js';
 
 // Create PubSub client
 const pubsub = new PubSub({

@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom';
 import { XMLParser } from 'fast-xml-parser';
 import config from '../../config/config.js';
 import { processTextContent } from './textProcessor.js';
-import { createScraperError } from '../../utils/errors/AppError.js';
+import { createExternalApiError, createServiceError } from '../../utils/errors/AppError.js';
 
 // Spanish month names to number mapping
 const MONTH_NAMES = {
@@ -205,8 +205,8 @@ async function fetchBOESummary(date, requestId) {
       });
 
       if (response.status !== 200) {
-        throw createScraperError(`Unexpected status code: ${response.status}`, {
-          url, attempt, status: response.status
+        throw createExternalApiError(`BOE Summary fetch failed: Unexpected status code ${response.status}`, {
+          url, attempt, status: response.status, service: 'BOE'
         });
       }
       console.log(`Successfully fetched BOE summary - Request ID: ${requestId}, Status: ${response.status}, Attempt: ${attempt}`);
@@ -215,8 +215,8 @@ async function fetchBOESummary(date, requestId) {
       console.warn(`Attempt ${attempt} failed to fetch BOE summary - Request ID: ${requestId}, Error:`, error.message);
       if (attempt === MAX_RETRIES) {
         console.error(`Failed to fetch BOE summary after ${MAX_RETRIES} attempts - Request ID: ${requestId}, URL: ${url}, Error:`, error);
-        throw createScraperError(`Failed to fetch BOE summary from ${url} after ${MAX_RETRIES} attempts`, {
-          url, attempts: MAX_RETRIES, cause: error
+        throw createExternalApiError(`Failed to fetch BOE summary from ${url} after ${MAX_RETRIES} attempts`, {
+          url, attempts: MAX_RETRIES, cause: error, service: 'BOE'
         });
       }
       await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt)); // Exponential backoff
@@ -237,7 +237,7 @@ function parseBOEXML(xmlData, requestId) {
 
     if (!jsonObj.sumario || !jsonObj.sumario.diario || !jsonObj.sumario.item) {
       console.warn(`Incomplete BOE XML structure - Request ID: ${requestId}, Data:`, xmlData.substring(0, 500));
-      throw createScraperError('Incomplete BOE XML structure', { xmlPreview: xmlData.substring(0, 500) });
+      throw createServiceError('Incomplete BOE XML structure', { xmlPreview: xmlData.substring(0, 500) });
     }
 
     const items = Array.isArray(jsonObj.sumario.item) ? jsonObj.sumario.item : [jsonObj.sumario.item];
@@ -267,7 +267,10 @@ function parseBOEXML(xmlData, requestId) {
     };
   } catch (error) {
     console.error(`Failed to parse BOE XML - Request ID: ${requestId}, Error:`, error);
-    throw createScraperError('Failed to parse BOE XML', { cause: error });
+    if (error instanceof Error && error.code && error.isOperational) {
+        throw error; // Re-throw AppError directly
+    }
+    throw createServiceError('Failed to parse BOE XML', { cause: error });
   }
 }
 
@@ -289,7 +292,7 @@ async function scrapeBOEText(htmlUrl, requestId) {
     });
 
     if (response.status !== 200) {
-      // console.warn(`Failed to scrape BOE text: Status ${response.status} - Request ID: ${requestId}, URL: ${htmlUrl}`);
+      console.warn(`Failed to scrape BOE text: Status ${response.status} - Request ID: ${requestId}, URL: ${htmlUrl}`);
       return null; // Don't fail the whole process, just skip this item
     }
 
@@ -300,14 +303,15 @@ async function scrapeBOEText(htmlUrl, requestId) {
     const contentElement = document.querySelector('#textoxslt') || document.querySelector('.documento-cont') || document.body;
 
     if (!contentElement) {
-       // console.warn(`Could not find main content element - Request ID: ${requestId}, URL: ${htmlUrl}`);
+       console.warn(`Could not find main content element - Request ID: ${requestId}, URL: ${htmlUrl}`);
        return document.body.textContent; // Fallback to body text
     }
 
     return processTextContent(contentElement.textContent);
 
   } catch (error) {
-    // console.warn(`Error scraping BOE text - Request ID: ${requestId}, URL: ${htmlUrl}, Error: ${error.message}`);
+    // Log but don't throw an error that stops processing other items
+    console.warn(`Error scraping BOE text - Request ID: ${requestId}, URL: ${htmlUrl}, Error: ${error.message}`);
     return null; // Don't fail the whole process
   }
 }

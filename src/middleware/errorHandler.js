@@ -1,8 +1,8 @@
 /**
  * Error handling middleware
  */
-import config from '../../config/config.js';
-import { publishError } from '../pubsub.js'; // Import PubSub error publisher
+import config from '../config/config.js';
+import { publishError } from '../utils/pubsub.js'; // Import PubSub error publisher
 
 /**
  * Centralized error handler
