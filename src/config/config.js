@@ -70,7 +70,7 @@ const config = {
     },
   },
   auth: {
-    apiKey: process.env.API_KEY || '',
+    apiKey: '',
   },
   scraper: {
       timeout: parseInt(process.env.SCRAPER_TIMEOUT_MS || '15000', 10),
