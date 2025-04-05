@@ -1,4 +1,8 @@
-# BOE Parser Project Guidelines
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## BOE Parser Project Guidelines
 
 ## Build Commands
 - `npm run start` - Start production server
@@ -8,18 +12,19 @@
 - `npx vitest run path/to/test.js` - Run a specific test file
 
 ## Code Style Guidelines
-- **Architecture**: Service-oriented with clear separation between API endpoints, services, and utilities
+- **Architecture**: Layered architecture with config/, controllers/, middleware/, routes/, services/, and utils/
 - **JavaScript**: ES Modules (type: module in package.json)
-- **Imports**: Group external packages first, then internal modules
+- **Imports**: Group external packages first, then internal modules by layer
 - **Naming**: camelCase for variables/functions, PascalCase for classes
-- **Error Handling**: Use structured error responses with standard HTTP status codes, propagate to PubSub for monitoring
-- **Formatting**: 2-space indentation, consistent line length
-- **Logging**: Use structured logger (src/utils/logger.js) with context first, message second
-- **API**: RESTful endpoints with Bearer token authentication
+- **Error Handling**: Use AppError class hierarchy from utils/errors with standardized HTTP status codes
+- **Formatting**: 2-space indentation, line length under 100 characters
+- **Logging**: Use structured logger (utils/logger.js) with context object followed by message string
+- **API Routes**: Organized in routes/ with controller logic in controllers/
+- **Services**: Domain-driven organization (ai/, parser/) with client/implementation separation
 - **PubSub**: Follow message schema in docs/pubsub-structure.md
 
 ## Important Notes
-- Cloud-based deployment on Google Cloud Run
-- Secrets managed via Google Cloud Secret Manager
-- Request IDs used for traceability throughout the system
-- Environmental variables for configuration
+- API key validation via Bearer token authentication
+- Secrets managed via config/config.js with Secret Manager integration
+- Request IDs propagated for traceability
+- Configuration validation on startup

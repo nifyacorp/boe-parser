@@ -1,185 +1,251 @@
+/**
+ * Google PubSub integration module
+ */
 import { PubSub } from '@google-cloud/pubsub';
-import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
+import logger from './logger.js';
+import config from '../config/config.js';
 
+// Create PubSub client
 const pubsub = new PubSub({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT
+  projectId: config.services.pubsub.projectId,
 });
 
-// PubSub configuration from environment variables
-const mainTopicName = process.env.PUBSUB_TOPIC_NAME || 'processor-results';
-const dlqTopicName = process.env.PUBSUB_DLQ_TOPIC_NAME || 'processor-results-dlq';
+// PubSub topic names
+const MAIN_TOPIC = config.services.pubsub.topicName;
+const DLQ_TOPIC = `${MAIN_TOPIC}-dlq`;
 
-// Log PubSub configuration on startup
+// Log PubSub configuration on module import
 logger.info({
-  mainTopic: mainTopicName,
-  dlqTopic: dlqTopicName
+  mainTopic: MAIN_TOPIC,
+  dlqTopic: DLQ_TOPIC,
+  projectId: config.services.pubsub.projectId || 'local',
 }, 'PubSub configuration initialized');
 
+/**
+ * Transform raw matches into standardized format
+ * @param {Array} matches - Raw matches from analysis
+ * @param {Array} prompts - Prompts used for analysis
+ * @param {string} queryDate - Date of BOE query
+ * @returns {Array} - Transformed matches in standardized format
+ */
+function transformMatches(matches, prompts = ['General information'], queryDate = new Date().toISOString().split('T')[0]) {
+  if (!matches || matches.length === 0) {
+    return [{
+      prompt: prompts[0],
+      documents: [],
+    }];
+  }
+
+  return matches.map(match => ({
+    prompt: match.prompt || prompts[0],
+    documents: [{
+      document_type: 'boe_document',
+      title: match.title || 'No title',
+      notification_title: match.notification_title || match.title || 'Notification',
+      issuing_body: match.issuing_body || '',
+      summary: match.summary || '',
+      relevance_score: match.relevance_score || 0,
+      links: match.links || { html: 'https://www.boe.es', pdf: '' },
+      publication_date: match.publication_date || queryDate,
+      section: match.section || 'general',
+      bulletin_type: match.bulletin_type || 'BOE',
+    }],
+  }));
+}
+
+/**
+ * Extract matches from various possible response structures
+ * @param {Object} results - Analysis results object
+ * @returns {Array} - Extracted matches
+ */
+function extractMatches(results) {
+  if (!results) {
+    return [];
+  }
+
+  if (Array.isArray(results.matches)) {
+    return results.matches;
+  }
+
+  if (Array.isArray(results.results?.[0]?.matches)) {
+    return results.results[0].matches;
+  }
+
+  if (Array.isArray(results.results)) {
+    return results.results.flatMap(r => 
+      Array.isArray(r.matches) ? r.matches.map(m => ({...m, prompt: r.prompt})) : []
+    );
+  }
+
+  return [];
+}
+
+/**
+ * Publish analysis results to PubSub
+ * @param {Object} payload - Analysis payload
+ * @returns {Promise<string>} - Message ID
+ */
 export async function publishResults(payload) {
   try {
-    // Ensure we have a trace ID for tracking
+    // Ensure trace ID for tracking
     const traceId = payload.trace_id || randomUUID();
     
-    // IMPORTANT: This implementation follows the standardized message schema
-    // as defined in the notification-worker/src/types/boe.js
-    // Any changes to this structure must be coordinated with notification-worker
+    // Extract necessary data
+    const results = payload.results || {};
+    const request = payload.request || payload.context || {};
+    const prompts = request.texts || payload.texts || ['General information'];
+    const queryDate = results.query_date || new Date().toISOString().split('T')[0];
     
-    // Extract the flat matches array from results if it exists
-    let matches = [];
+    // Extract matches
+    const matches = extractMatches(results);
     
-    // Try different paths to find matches
-    if (Array.isArray(payload.results?.matches)) {
-      matches = payload.results.matches;
-    } else if (Array.isArray(payload.results?.results?.[0]?.matches)) {
-      matches = payload.results.results[0].matches;
-    } else if (payload.results?.results) {
-      // Extract matches from all results
-      matches = payload.results.results.flatMap(r => 
-        Array.isArray(r.matches) ? r.matches.map(m => ({...m, prompt: r.prompt})) : []
-      );
-    }
+    // Transform matches to standardized format
+    const transformedMatches = transformMatches(matches, prompts, queryDate);
     
-    // Ensure we have the query date (today if not specified)
-    const queryDate = payload.results?.query_date || new Date().toISOString().split('T')[0];
-    
-    // Ensure we have BOE info
-    const boeInfo = payload.results?.boe_info || {
-      issue_number: 'N/A',
-      publication_date: queryDate,
-      source_url: 'https://www.boe.es'
-    };
-    
-    // Get subscription ID and user ID from payload
-    const subscriptionId = payload.request?.subscription_id || payload.context?.subscription_id || 'unknown';
-    const userId = payload.request?.user_id || payload.context?.user_id || 'unknown';
-    
-    // Get prompts from payload
-    const prompts = payload.request?.texts || payload.texts || ['General information'];
-    
-    // Transform all matches into BOE notification worker format
-    const transformedMatches = matches.map(match => {
-      return {
-        prompt: match.prompt || prompts[0] || 'General information',
-        documents: [{
-          document_type: 'boe_document',
-          title: match.title || 'No title',
-          notification_title: match.notification_title || match.title || 'Notification',
-          issuing_body: match.issuing_body || '',
-          summary: match.summary || '',
-          relevance_score: match.relevance_score || 0,
-          links: match.links || { html: 'https://www.boe.es', pdf: '' },
-          publication_date: match.publication_date || new Date().toISOString(),
-          section: match.section || 'general',
-          bulletin_type: match.bulletin_type || 'BOE'
-        }]
-      };
-    });
-    
-    // If no matches were found, create a single empty match structure
-    if (transformedMatches.length === 0) {
-      transformedMatches.push({
-        prompt: prompts[0] || 'General information',
-        documents: []
-      });
-    }
-    
-    // Create the message structure that EXACTLY matches what the notification worker expects
-    // according to the BOEMessageSchema in notification-worker/src/types/boe.js
+    // Create standardized message
     const message = {
-      // Required version field
       version: '1.0',
       trace_id: traceId,
       processor_type: 'boe',
       timestamp: new Date().toISOString(),
       
-      // Request details with required fields
       request: {
-        subscription_id: subscriptionId,
-        user_id: userId,
+        subscription_id: request.subscription_id || 'unknown',
+        user_id: request.user_id || 'unknown',
         processing_id: randomUUID(),
-        prompts: prompts
+        prompts: prompts,
       },
       
-      // Results section with required query_date and matches array (not nested under results)
       results: {
         query_date: queryDate,
-        matches: transformedMatches
+        matches: transformedMatches,
       },
       
-      // Metadata with required fields
       metadata: {
         processing_time_ms: payload.metadata?.processing_time_ms || 0,
         total_items_processed: payload.metadata?.total_items_processed || 0,
         total_matches: matches.length,
-        model_used: payload.metadata?.model_used || "gemini-2.0-flash-lite",
-        status: payload.metadata?.status || 'success',
-        error: null
-      }
+        model_used: payload.metadata?.model_used || 'gemini-1.5-pro',
+        status: payload.error ? 'error' : (payload.metadata?.status || 'success'),
+        error: payload.error || payload.metadata?.error || null,
+      },
     };
     
-    // Log the exact message structure we're sending (for debugging)
+    // Log message structure (debug level)
     logger.debug({
-      pubsub_message: message,
       trace_id: traceId,
-      subscription_id: subscriptionId,
-      user_id: userId,
-      matches_count: transformedMatches.length
-    }, 'PubSub message structure');
-    
-    // Handle error case
-    if (payload.error || payload.metadata?.error) {
-      message.metadata.error = payload.error || payload.metadata?.error;
-      message.metadata.status = "error";
-    }
-    
-    // Create the buffer for publishing
-    const dataBuffer = Buffer.from(JSON.stringify(message));
+      subscription_id: message.request.subscription_id,
+      user_id: message.request.user_id,
+      matches_count: transformedMatches.length,
+    }, 'Publishing PubSub message');
     
     // Publish to main topic
-    const messageId = await pubsub.topic(mainTopicName).publish(dataBuffer);
+    const dataBuffer = Buffer.from(JSON.stringify(message));
+    const messageId = await pubsub.topic(MAIN_TOPIC).publish(dataBuffer);
     
     logger.info({
       messageId,
-      topicName: mainTopicName,
-      traceId: message.trace_id
+      topicName: MAIN_TOPIC,
+      traceId,
     }, 'Published BOE analysis results to PubSub');
 
     return messageId;
   } catch (error) {
     logger.error({
-      error: error.message,
-      stack: error.stack,
-      topicName: mainTopicName
+      error,
+      topicName: MAIN_TOPIC,
     }, 'Failed to publish results to PubSub');
 
-    // Attempt to publish to DLQ if main publish fails
-    try {
-      const dlqMessage = {
-        original_payload: payload,
-        error: {
-          message: error.message,
-          stack: error.stack,
-          timestamp: new Date().toISOString()
-        }
-      };
-      
-      const dlqMessageId = await pubsub.topic(dlqTopicName).publish(
-        Buffer.from(JSON.stringify(dlqMessage))
-      );
-      
-      logger.info({
-        messageId: dlqMessageId,
-        topicName: dlqTopicName
-      }, 'Published failed message to DLQ');
-    } catch (dlqError) {
-      logger.error({
-        error: dlqError.message,
-        stack: dlqError.stack,
-        originalError: error.message
-      }, 'Failed to publish to DLQ');
-    }
-
+    // Attempt to publish to DLQ
+    await publishToDLQ(payload, error);
+    
     throw error;
+  }
+}
+
+/**
+ * Publish error to PubSub for monitoring
+ * @param {Error} error - Error object
+ * @param {Object} req - Express request object
+ * @returns {Promise<string>} - Message ID
+ */
+export async function publishError(error, req) {
+  try {
+    const errorMessage = {
+      version: '1.0',
+      trace_id: req.id || randomUUID(),
+      timestamp: new Date().toISOString(),
+      error: {
+        message: error.message,
+        code: error.code || 'INTERNAL_ERROR',
+        statusCode: error.statusCode || 500,
+        stack: error.stack,
+        isOperational: error.isOperational || false,
+      },
+      request: {
+        path: req.path,
+        method: req.method,
+        query: req.query,
+        headers: {
+          'user-agent': req.headers['user-agent'],
+          'content-type': req.headers['content-type'],
+        },
+      },
+    };
+    
+    const dataBuffer = Buffer.from(JSON.stringify(errorMessage));
+    const messageId = await pubsub.topic(DLQ_TOPIC).publish(dataBuffer);
+    
+    logger.info({
+      messageId,
+      topicName: DLQ_TOPIC,
+      traceId: errorMessage.trace_id,
+    }, 'Published error to PubSub');
+
+    return messageId;
+  } catch (pubsubError) {
+    logger.error({
+      error: pubsubError,
+      originalError: error.message,
+    }, 'Failed to publish error to PubSub');
+    
+    return null;
+  }
+}
+
+/**
+ * Publish failed message to DLQ
+ * @param {Object} originalPayload - Original payload that failed
+ * @param {Error} error - Error that occurred
+ * @returns {Promise<string>} - Message ID
+ */
+async function publishToDLQ(originalPayload, error) {
+  try {
+    const dlqMessage = {
+      original_payload: originalPayload,
+      error: {
+        message: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString(),
+      },
+    };
+    
+    const dataBuffer = Buffer.from(JSON.stringify(dlqMessage));
+    const messageId = await pubsub.topic(DLQ_TOPIC).publish(dataBuffer);
+    
+    logger.info({
+      messageId,
+      topicName: DLQ_TOPIC,
+    }, 'Published failed message to DLQ');
+
+    return messageId;
+  } catch (dlqError) {
+    logger.error({
+      error: dlqError,
+      originalError: error.message,
+    }, 'Failed to publish to DLQ');
+    
+    return null;
   }
 }
