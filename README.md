@@ -132,11 +132,16 @@ These variables **must** be set for the application to function correctly.
 |---|---|---|
 | `GOOGLE_CLOUD_PROJECT` | Your Google Cloud Project ID. | `my-gcp-project-id` |
 | `PUBSUB_TOPIC_NAME` | The Pub/Sub topic ID where analysis results are published. | `processor-results` |
-| `GEMINI_API_KEY` | API Key for Google AI (Gemini). **Set directly or via Secret Manager.** | `AIza...` |
-| `OPENAI_API_KEY` | API Key for OpenAI. **Set directly or via Secret Manager.** | `sk-...` |
-| `API_KEY` | The secret key clients must provide in the `Authorization: Bearer <key>` header. **Set directly or via Secret Manager.** | `my-secret-bearer-token` |
+| `GEMINI_API_KEY` | API Key for Google AI (Gemini). **See note below.** | `AIza...` |
+| `OPENAI_API_KEY` | API Key for OpenAI. **See note below.** | `sk-...` |
+| `API_KEY` | The secret key clients must provide in the `Authorization: Bearer <key>` header. **See note below.** | `my-secret-bearer-token` |
 
-**Note on API Keys:** In production (when `NODE_ENV=production`), the application will attempt to load `GEMINI_API_KEY`, `OPENAI_API_KEY`, and `API_KEY` from Google Cloud Secret Manager using secrets with the *exact same names* as the environment variables. If running locally or if Secret Manager access fails, it falls back to the direct environment variable values.
+**Note on API Keys / Secrets:** The application loads sensitive keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `API_KEY`) using the following priority order:
+1.  **Environment Variable:** Checks `process.env.VAR_NAME` directly.
+2.  **Mounted Secret File:** Checks for a file at `/etc/secrets/VAR_NAME` (standard path for secrets mounted via `--set-secrets` in Cloud Run).
+3.  **Secret Manager API (Production Only):** If running with `NODE_ENV=production` AND the key wasn't found via the methods above, it attempts to fetch the secret named `VAR_NAME` from Google Cloud Secret Manager using its API. Requires the service account to have the Secret Manager Secret Accessor role.
+
+Therefore, you can provide these keys either as regular environment variables (`--set-env-vars`) or, more securely, by mounting them from Secret Manager (`--set-secrets=ENV_VAR_NAME=SECRET_NAME:latest`).
 
 ### Optional
 
