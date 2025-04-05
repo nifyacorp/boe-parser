@@ -1,46 +1,51 @@
 /**
- * Parser service facade
+ * BOE Parser Service - Orchestrates fetching and parsing
  */
-import { fetchBOEContent } from './scraper.js';
-import { normalizePrompts } from './textProcessor.js';
-import logger from '../../utils/logger.js';
+import { fetchBOESummary, parseBOEXML } from './scraper.js';
+import { createScraperError } from '../../utils/errors/AppError.js';
 
 /**
- * Fetch and process BOE content with prompts
- * @param {Object} options - Parser options
- * @param {string} options.date - Date in YYYY-MM-DD format
- * @param {Array|string} options.prompts - Analysis prompts
- * @param {string} options.requestId - Request ID for logging
- * @returns {Promise<Object>} - Parsed content and normalized prompts
+ * Fetch and parse BOE content for a specific date or range
+ * @param {Object} options - Options { date, prompts, requestId }
+ * @returns {Promise<Object>} - Parsed BOE content and prompts
  */
 export async function parseBOE(options = {}) {
-  const { date, prompts = [], requestId } = options;
-  
+  const { date, prompts, requestId } = options;
+
+  // Determine date: use provided date or default to today
+  const targetDate = date || new Date().toISOString().split('T')[0];
+  const formattedDate = targetDate.replace(/-/g, ''); // YYYYMMDD format
+
+  console.log(`Starting BOE parsing - Request ID: ${requestId}, Date: ${targetDate}`);
+
   try {
-    // Fetch BOE content
-    const boeContent = await fetchBOEContent(date, requestId);
-    
-    // Normalize prompts
-    const normalizedPrompts = normalizePrompts(prompts);
-    
-    logger.info({
-      requestId,
-      itemsCount: boeContent.items.length,
-      promptsCount: normalizedPrompts.length,
-      date: boeContent.query_date
-    }, 'BOE content parsed successfully');
-    
+    // 1. Fetch BOE summary XML
+    const xmlData = await fetchBOESummary(formattedDate, requestId);
+
+    // 2. Parse XML data
+    const boeContent = parseBOEXML(xmlData, requestId);
+
+    console.log(`Finished BOE parsing - Request ID: ${requestId}, Items Found: ${boeContent.items.length}`);
+
+    // Return parsed content and the original prompts
     return {
       boeContent,
-      prompts: normalizedPrompts
+      prompts: prompts || [] // Ensure prompts is always an array
     };
+
   } catch (error) {
-    logger.error({
-      requestId,
-      error,
-      date
-    }, 'Failed to parse BOE content');
-    
-    throw error;
+    console.error(`Error in BOE parsing process - Request ID: ${requestId}, Date: ${targetDate}, Error:`, error);
+
+    // Rethrow or handle specific errors as needed
+    if (error.code === 'SCRAPER_ERROR') {
+      throw error; // Propagate scraper-specific errors
+    } else {
+      // Wrap other errors
+      throw createScraperError(`BOE parsing failed for date ${targetDate}`, {
+        cause: error,
+        date: targetDate,
+        requestId
+      });
+    }
   }
 }

@@ -3,10 +3,10 @@
  */
 import axios from 'axios';
 import { JSDOM } from 'jsdom';
-import logger from '../../utils/logger.js';
-import { formatDate } from '../../utils/dateFormatter.js';
-import { createChildLogger } from '../../utils/logger.js';
-import { createExternalApiError } from '../../utils/errors/AppError.js';
+import { XMLParser } from 'fast-xml-parser';
+import config from '../../config/config.js';
+import { processTextContent } from './textProcessor.js';
+import { createScraperError } from '../../utils/errors/AppError.js';
 
 // Spanish month names to number mapping
 const MONTH_NAMES = {
@@ -178,3 +178,132 @@ export async function fetchBOEContent(date, requestId) {
     });
   }
 }
+
+/**
+ * Fetch BOE summary XML with retries
+ * @param {string} date - Date in YYYYMMDD format
+ * @param {string} requestId - Request ID for logging
+ * @returns {Promise<string>} - XML content
+ */
+async function fetchBOESummary(date, requestId) {
+  const url = `${BOE_BASE_URL}${SUMMARY_ENDPOINT}${date}`;
+  console.log(`Fetching BOE summary - Request ID: ${requestId}, URL: ${url}`);
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await axios.get(url, {
+        timeout: config.scraper.timeout || 15000,
+        headers: {
+          'User-Agent': config.scraper.userAgent || 'BOE Parser Bot'
+        }
+      });
+
+      if (response.status !== 200) {
+        throw createScraperError(`Unexpected status code: ${response.status}`, {
+          url, attempt, status: response.status
+        });
+      }
+      console.log(`Successfully fetched BOE summary - Request ID: ${requestId}, Status: ${response.status}, Attempt: ${attempt}`);
+      return response.data;
+    } catch (error) {
+      console.warn(`Attempt ${attempt} failed to fetch BOE summary - Request ID: ${requestId}, Error:`, error.message);
+      if (attempt === MAX_RETRIES) {
+        console.error(`Failed to fetch BOE summary after ${MAX_RETRIES} attempts - Request ID: ${requestId}, URL: ${url}, Error:`, error);
+        throw createScraperError(`Failed to fetch BOE summary from ${url} after ${MAX_RETRIES} attempts`, {
+          url, attempts: MAX_RETRIES, cause: error
+        });
+      }
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt)); // Exponential backoff
+    }
+  }
+}
+
+/**
+ * Parse BOE XML summary
+ * @param {string} xmlData - XML content
+ * @param {string} requestId - Request ID for logging
+ * @returns {Object} - Parsed BOE data
+ */
+function parseBOEXML(xmlData, requestId) {
+  try {
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+    const jsonObj = parser.parse(xmlData);
+
+    if (!jsonObj.sumario || !jsonObj.sumario.diario || !jsonObj.sumario.item) {
+      console.warn(`Incomplete BOE XML structure - Request ID: ${requestId}, Data:`, xmlData.substring(0, 500));
+      throw createScraperError('Incomplete BOE XML structure', { xmlPreview: xmlData.substring(0, 500) });
+    }
+
+    const items = Array.isArray(jsonObj.sumario.item) ? jsonObj.sumario.item : [jsonObj.sumario.item];
+    const boeInfo = jsonObj.sumario.diario;
+    const queryDate = jsonObj.sumario['@_fecha'];
+
+    console.log(`Parsed BOE XML - Request ID: ${requestId}, Items: ${items.length}, BOE Date: ${queryDate}`);
+
+    return {
+      items: items.map(item => ({
+        id: item.urlHito?.replace('/diario_boe/txt.php?id=', '') || item['@_id'],
+        title: processTextContent(item.titulo),
+        department: processTextContent(item.departamento),
+        section: processTextContent(item.seccion?.['@_nombre']),
+        epigraph: processTextContent(item.epigrafe),
+        origin: processTextContent(item.origen_legislativo),
+        pdf_url: item.urlPdf ? `${BOE_BASE_URL}${item.urlPdf}` : null,
+        html_url: item.urlHito ? `${BOE_BASE_URL}${item.urlHito}` : null,
+        text_content: null, // Placeholder for scraped text
+      })),
+      boe_info: {
+        issue_number: boeInfo['@_nbo'],
+        publication_date: queryDate,
+        source_url: `${BOE_BASE_URL}${SUMMARY_ENDPOINT}${queryDate.replace(/-/g, '')}`
+      },
+      query_date: queryDate
+    };
+  } catch (error) {
+    console.error(`Failed to parse BOE XML - Request ID: ${requestId}, Error:`, error);
+    throw createScraperError('Failed to parse BOE XML', { cause: error });
+  }
+}
+
+/**
+ * Scrape text content from a BOE HTML page
+ * @param {string} htmlUrl - URL of the BOE page
+ * @param {string} requestId - Request ID for logging
+ * @returns {Promise<string|null>} - Scraped text content or null if failed
+ */
+async function scrapeBOEText(htmlUrl, requestId) {
+  if (!htmlUrl) return null;
+
+  // console.log(`Scraping BOE text - Request ID: ${requestId}, URL: ${htmlUrl}`);
+
+  try {
+    const response = await axios.get(htmlUrl, {
+      timeout: config.scraper.timeout || 10000,
+      headers: { 'User-Agent': config.scraper.userAgent || 'BOE Parser Bot' }
+    });
+
+    if (response.status !== 200) {
+      // console.warn(`Failed to scrape BOE text: Status ${response.status} - Request ID: ${requestId}, URL: ${htmlUrl}`);
+      return null; // Don't fail the whole process, just skip this item
+    }
+
+    const dom = new JSDOM(response.data);
+    const document = dom.window.document;
+
+    // Find the main content container (adjust selector based on actual BOE structure)
+    const contentElement = document.querySelector('#textoxslt') || document.querySelector('.documento-cont') || document.body;
+
+    if (!contentElement) {
+       // console.warn(`Could not find main content element - Request ID: ${requestId}, URL: ${htmlUrl}`);
+       return document.body.textContent; // Fallback to body text
+    }
+
+    return processTextContent(contentElement.textContent);
+
+  } catch (error) {
+    // console.warn(`Error scraping BOE text - Request ID: ${requestId}, URL: ${htmlUrl}, Error: ${error.message}`);
+    return null; // Don't fail the whole process
+  }
+}
+
+export { fetchBOESummary, parseBOEXML, scrapeBOEText };

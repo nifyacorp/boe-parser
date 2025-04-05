@@ -2,9 +2,12 @@
  * Gemini AI service for BOE analysis
  */
 import { getGeminiModel } from './client.js';
-import logger from '../../utils/logger.js';
 import config from '../../config/config.js';
 import { createSystemPrompt, createContentPrompt } from './prompts/gemini.js';
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import { systemPrompt, formatPrompt } from './prompts/geminiPrompt.js';
+import { createAIServiceError } from '../../utils/errors/AppError.js';
+import { parseAIResponse } from './responseParser.js';
 
 /**
  * Extract keywords from prompt
@@ -42,7 +45,7 @@ function parseGeminiResponse(responseText, requestId) {
     // Extract JSON from response (in case there's any text wrapping it)
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      logger.error({
+      console.error({
         requestId,
         responseText: responseText.substring(0, 500) + (responseText.length > 500 ? '...' : '')
       }, 'No JSON object found in Gemini response');
@@ -53,7 +56,7 @@ function parseGeminiResponse(responseText, requestId) {
     const jsonString = jsonMatch[0];
     return JSON.parse(jsonString);
   } catch (error) {
-    logger.error({
+    console.error({
       requestId,
       error,
       responseText: responseText.substring(0, 500) + (responseText.length > 500 ? '...' : '')
@@ -72,125 +75,93 @@ function parseGeminiResponse(responseText, requestId) {
  * @returns {Promise<Object>} - Analysis results
  */
 export async function analyzeWithGemini(boeItems, prompt, requestId, options = {}) {
+  const model = getGeminiModel();
+  const startTime = Date.now();
+
+  // console.log(`Starting Gemini analysis - Request ID: ${requestId}, Items: ${boeItems.length}`);
+
+  const generationConfig = {
+    temperature: 0.2,
+    topK: 1,
+    topP: 1,
+    maxOutputTokens: 8192,
+  };
+
+  const safetySettings = [
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  ];
+
+  const fullPrompt = formatPrompt(boeItems, prompt);
+
+  const parts = [
+    { text: systemPrompt },
+    { text: fullPrompt },
+  ];
+
   try {
-    // Check if there are BOE items to analyze
-    if (!boeItems || boeItems.length === 0) {
-      logger.warn({ requestId, prompt }, 'No BOE items to analyze. Returning empty result set.');
-      return {
-        matches: [],
-        metadata: {
-          model_used: config.services.gemini.model,
-          no_content_reason: "No BOE items available for analysis"
-        }
-      };
-    }
-    
-    const startTime = Date.now();
-    
-    logger.info({
-      requestId,
-      contentSize: {
-        itemCount: boeItems.length,
-        contentSize: JSON.stringify(boeItems).length,
-        querySize: prompt.length
-      }
-    }, 'Starting BOE analysis with Gemini');
-    
-    // Get Gemini model
-    const model = getGeminiModel();
-    
-    // Set generation config
-    const generationConfig = {
-      temperature: 0.2,
-      topP: 0.95,
-      topK: 64,
-      maxOutputTokens: 8192,
-      responseMimeType: "text/plain",
-    };
-    
-    // Start chat session
-    const chatSession = model.startChat({
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts }],
       generationConfig,
-      history: [
-        {
-          role: "user",
-          parts: [{ text: createSystemPrompt(prompt) }]
-        }
-      ],
+      safetySettings,
     });
-    
-    // Extract keywords and filter relevant items
-    const keywords = extractKeywords(prompt);
-    const filteredItems = filterRelevantItems(boeItems, keywords);
-    
-    // Use filtered items if available, otherwise use all
-    let selectedItems = filteredItems.length > 0 ? filteredItems : boeItems;
-    
-    // Limit items to avoid exceeding token limits
-    const MAX_ITEMS = 50;
-    const limitedItems = selectedItems.length > MAX_ITEMS 
-      ? selectedItems.slice(0, MAX_ITEMS) 
-      : selectedItems;
-    
-    logger.info({
-      requestId,
-      originalItemCount: boeItems.length,
-      filteredItemCount: filteredItems.length,
-      finalItemCount: limitedItems.length,
-      keywords
-    }, 'Filtered and limited BOE items for Gemini analysis');
-    
-    // Create content prompt
-    const contentPrompt = createContentPrompt(limitedItems, prompt, boeItems.length);
-    
-    // Send message to Gemini
-    logger.info({
-      requestId,
-      model: config.services.gemini.model,
-      promptLength: contentPrompt.length,
-      itemsCount: limitedItems.length
-    }, 'Sending request to Gemini API');
-    
-    const result = await chatSession.sendMessage(contentPrompt);
-    const responseText = result.response.text();
-    
-    logger.info({
-      requestId,
-      responseLength: responseText.length,
-      responsePreview: responseText.substring(0, 200) + (responseText.length > 200 ? '...' : '')
-    }, 'Received response from Gemini');
-    
-    // Parse response
-    const jsonResponse = parseGeminiResponse(responseText, requestId);
-    
-    // Prepare final response
-    const endTime = Date.now();
-    const processingTime = endTime - startTime;
-    
-    const finalResponse = {
-      matches: jsonResponse.matches || [],
-      metadata: {
-        model_used: config.services.gemini.model,
-        processing_time_ms: processingTime,
-        total_items_processed: boeItems.length,
-        filtered_items_processed: limitedItems.length,
-      }
+
+    const processingTime = Date.now() - startTime;
+
+    if (!result.response) {
+      // console.error(`Gemini analysis failed: No response object - Request ID: ${requestId}, Full Result:`, result);
+      console.error(`Gemini analysis failed: No response object - Request ID: ${requestId}, Full Result:`, result);
+      throw createAIServiceError('Gemini API returned no response object', { code: 'GEMINI_NO_RESPONSE', details: result });
+    }
+
+    const response = result.response;
+    const responseText = response.text();
+
+    // console.log(`Gemini raw response received - Request ID: ${requestId}, Text Length: ${responseText.length}`);
+
+    const parsedResult = parseAIResponse(responseText);
+
+    // Add metadata
+    parsedResult.metadata = {
+      model_used: config.services.gemini.model,
+      processing_time_ms: processingTime,
+      usage: response.usageMetadata, // Include usage if available
+      finish_reason: response.finishReason, // Include finish reason
+      safety_ratings: response.safetyRatings, // Include safety ratings
     };
-    
-    logger.info({
-      requestId,
-      matchesCount: finalResponse.matches.length,
-      processingTime
-    }, 'Completed BOE analysis with Gemini');
-    
-    return finalResponse;
+
+    // console.log(`Gemini analysis successful - Request ID: ${requestId}, Matches: ${parsedResult.matches.length}, Time: ${processingTime}ms`);
+    console.log(`Gemini analysis successful - Request ID: ${requestId}, Matches: ${parsedResult.matches.length}, Time: ${processingTime}ms`);
+
+    return parsedResult;
+
   } catch (error) {
-    logger.error({
-      requestId,
-      error,
-      prompt
-    }, 'Error analyzing BOE items with Gemini');
-    
-    throw error;
+    const processingTime = Date.now() - startTime;
+    // console.error(`Gemini analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
+    console.error(`Gemini analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
+
+    // Handle potential API errors (e.g., rate limits, blocked prompts)
+    if (error instanceof GoogleGenerativeAI) { // Check specific error types if available
+      throw createAIServiceError(`Gemini API error: ${error.message}`, {
+        code: 'GEMINI_API_ERROR',
+        status: error.status, // Or relevant error code/status
+        cause: error
+      });
+    } else if (error.finishReason && error.finishReason !== 'STOP') {
+      // Handle cases where generation finished due to safety, length, etc.
+      throw createAIServiceError(`Gemini generation finished unexpectedly: ${error.finishReason}`, {
+        code: 'GEMINI_FINISH_REASON_ERROR',
+        details: { finishReason: error.finishReason, safetyRatings: error.safetyRatings },
+        cause: error
+      });
+    }
+
+    // Rethrow other errors or wrap them
+    throw createAIServiceError(`Gemini analysis failed: ${error.message}`, {
+      code: 'GEMINI_ANALYSIS_FAILED',
+      cause: error
+    });
   }
 }

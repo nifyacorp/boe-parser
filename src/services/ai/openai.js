@@ -2,9 +2,11 @@
  * OpenAI service for BOE analysis
  */
 import { getOpenAIClient } from './client.js';
-import logger from '../../utils/logger.js';
 import config from '../../config/config.js';
 import { createSystemPrompt, createUserPrompt } from './prompts/openai.js';
+import OpenAI from 'openai';
+import { createAIServiceError } from '../../utils/errors/AppError.js';
+import { parseAIResponse } from './responseParser.js';
 
 /**
  * Create OpenAI API payload
@@ -66,111 +68,78 @@ function filterRelevantItems(boeItems, prompt) {
  * @returns {Promise<Object>} - Analysis results
  */
 export async function analyzeWithOpenAI(boeItems, prompt, requestId, options = {}) {
+  const client = getOpenAIClient();
+  const startTime = Date.now();
+
+  // Replaced logger.debug with console.log (or remove if too verbose)
+  // console.log(`Starting OpenAI analysis - Request ID: ${requestId}, Items: ${boeItems.length}`);
+
+  const messages = [
+    { role: 'system', content: createSystemPrompt() },
+    { role: 'user', content: createUserPrompt(boeItems, prompt, boeItems.length) }
+  ];
+
   try {
-    // Check if there are BOE items to analyze
-    if (!boeItems || boeItems.length === 0) {
-      logger.warn({ requestId, prompt }, 'No BOE items to analyze. Returning empty result set.');
-      return {
-        matches: [],
-        metadata: {
-          model_used: config.services.openai.model,
-          no_content_reason: "No BOE items available for analysis"
-        }
-      };
-    }
-    
-    const startTime = Date.now();
-    
-    logger.info({
-      requestId,
-      contentSize: {
-        itemCount: boeItems.length,
-        contentSize: JSON.stringify(boeItems).length,
-        querySize: prompt.length
-      }
-    }, 'Starting BOE analysis with OpenAI');
-    
-    // Get OpenAI client
-    const client = getOpenAIClient();
-    
-    // Filter relevant items
-    const filteredItems = filterRelevantItems(boeItems, prompt);
-    
-    // Use filtered items if available, otherwise use all
-    let selectedItems = filteredItems.length > 0 ? filteredItems : boeItems;
-    
-    // Limit items to avoid exceeding token limits
-    const MAX_ITEMS = 50;
-    const limitedItems = selectedItems.length > MAX_ITEMS 
-      ? selectedItems.slice(0, MAX_ITEMS) 
-      : selectedItems;
-    
-    logger.info({
-      requestId,
-      originalItemCount: boeItems.length,
-      filteredItemCount: filteredItems.length,
-      finalItemCount: limitedItems.length
-    }, 'Filtered and limited BOE items for OpenAI analysis');
-    
-    // Create API payload
-    const payload = createOpenAIPayload(limitedItems, prompt, boeItems.length);
-    
-    // Make API request
-    logger.info({
-      requestId,
+    const completion = await client.chat.completions.create({
       model: config.services.openai.model,
-      promptLength: JSON.stringify(payload).length,
-      itemsCount: limitedItems.length
-    }, 'Sending request to OpenAI API');
-    
-    const response = await client.chat.completions.create(payload);
-    
-    // Parse response
-    let jsonResponse;
-    try {
-      jsonResponse = JSON.parse(response.choices[0].message.content);
-    } catch (error) {
-      logger.error({
-        requestId,
-        error,
-        content: response.choices[0]?.message?.content
-      }, 'Failed to parse OpenAI response');
-      
-      jsonResponse = { matches: [] };
+      messages: messages,
+      temperature: 0.2,
+      max_tokens: 4096, // Adjust as needed
+      response_format: { type: "json_object" }, // Use JSON mode if available and applicable
+    });
+
+    const processingTime = Date.now() - startTime;
+
+    if (!completion.choices || completion.choices.length === 0 || !completion.choices[0].message?.content) {
+      // Replaced logger.error with console.error
+      console.error(`OpenAI analysis failed: No response content - Request ID: ${requestId}, Full Completion:`, completion);
+      throw createAIServiceError('OpenAI API returned no content', {
+        code: 'OPENAI_NO_CONTENT',
+        details: { finishReason: completion.choices?.[0]?.finish_reason }
+      });
     }
-    
-    // Prepare final response
-    const endTime = Date.now();
-    const processingTime = endTime - startTime;
-    
-    const finalResponse = {
-      matches: jsonResponse.matches || [],
-      metadata: {
-        model_used: config.services.openai.model,
-        processing_time_ms: processingTime,
-        total_items_processed: boeItems.length,
-        filtered_items_processed: limitedItems.length,
-        completion_tokens: response.usage?.completion_tokens || 0,
-        prompt_tokens: response.usage?.prompt_tokens || 0,
-        total_tokens: response.usage?.total_tokens || 0
-      }
+
+    const responseText = completion.choices[0].message.content;
+    const usage = completion.usage;
+    const finishReason = completion.choices[0].finish_reason;
+
+    // Replaced logger.debug with console.log (or remove if too verbose)
+    // console.log(`OpenAI raw response received - Request ID: ${requestId}, Text Length: ${responseText.length}, Finish Reason: ${finishReason}`);
+
+    const parsedResult = parseAIResponse(responseText); // Assumes response is JSON parsable due to response_format
+
+    // Add metadata
+    parsedResult.metadata = {
+      model_used: config.services.openai.model,
+      processing_time_ms: processingTime,
+      usage: usage, // Include token usage
+      finish_reason: finishReason, // Include finish reason
     };
-    
-    logger.info({
-      requestId,
-      matchesCount: finalResponse.matches.length,
-      processingTime,
-      tokens: response.usage
-    }, 'Completed BOE analysis with OpenAI');
-    
-    return finalResponse;
+
+    // Replaced logger.info with console.log
+    console.log(`OpenAI analysis successful - Request ID: ${requestId}, Matches: ${parsedResult.matches.length}, Time: ${processingTime}ms`);
+
+    return parsedResult;
+
   } catch (error) {
-    logger.error({
-      requestId,
-      error,
-      prompt
-    }, 'Error analyzing BOE items with OpenAI');
-    
-    throw error;
+    const processingTime = Date.now() - startTime;
+    // Replaced logger.error with console.error
+    console.error(`OpenAI analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
+
+    // Handle potential API errors
+    if (error instanceof OpenAI.APIError) {
+      throw createAIServiceError(`OpenAI API error: ${error.message}`, {
+        code: 'OPENAI_API_ERROR',
+        status: error.status,
+        type: error.type,
+        cause: error
+      });
+    }
+
+    // Rethrow other errors or wrap them
+    throw createAIServiceError(`OpenAI analysis failed: ${error.message}`, {
+      code: 'OPENAI_ANALYSIS_FAILED',
+      cause: error
+    });
   }
 }
