@@ -5,31 +5,54 @@ A Node.js microservice that analyzes content from the Boletín Oficial del Estad
 ## Features
 
 - 🔄 Automatic daily BOE content fetching and parsing
-- 🤖 AI-powered content analysis for natural language queries
+- 🤖 AI-powered content analysis for natural language queries (Gemini and OpenAI)
 - 📊 Structured JSON responses with relevance scoring
-- 🔐 Secure API key authentication via Google Cloud Secret Manager
+- 🔐 Secure API key authentication (can use Google Cloud Secret Manager)
 - 📝 Comprehensive logging system
 - 📚 Interactive API documentation
 - ☁️ Cloud-native design for Google Cloud Run
+- 📨 Publishes results to Google Cloud Pub/Sub
 
 ## Architecture
 
 The service follows a modular architecture with clear separation of concerns:
 
-### Directory Structure
+### Updated Directory Structure (approx.)
 
 ```plaintext
 src/
 ├── index.js              # Application entry point
+├── config/
+│   └── config.js         # Configuration loading (env vars, secrets)
+├── routes/
+│   ├── index.js          # Main router aggregation
+│   ├── analyze.js        # Analysis endpoint routes
+│   └── test.js           # Test endpoint routes
+├── controllers/
+│   ├── analyze.js        # Controller for analysis logic
+│   └── test.js           # Controller for test endpoints
 ├── services/
-│   ├── scraper.js        # BOE content fetching and parsing
-│   ├── textProcessor.js  # Query preprocessing
-│   └── openai.js        # AI analysis integration
+│   ├── ai/               # AI Service Facade & Implementations
+│   │   ├── index.js      # Facade (chooses Gemini/OpenAI)
+│   │   ├── client.js     # AI client initialization (Gemini/OpenAI)
+│   │   ├── gemini.js     # Gemini specific logic
+│   │   ├── openai.js     # OpenAI specific logic
+│   │   └── prompts/      # Directory for AI prompts
+│   └── parser/           # BOE Parsing Service
+│       ├── index.js      # Orchestrates fetching/parsing
+│       ├── scraper.js      # Fetches BOE XML/HTML
+│       └── textProcessor.js # Text cleaning utilities
+├── middleware/
+│   ├── index.js          # Middleware registration
+│   ├── auth.js           # API key authentication
+│   ├── errorHandler.js   # Global error handler
+│   ├── requestId.js      # Adds request ID
+│   └── validation.js     # Request body validation
 └── utils/
-    ├── auth.js          # API key validation
-    ├── logger.js        # Structured logging
-    ├── secrets.js       # Secret management
-    └── apiDocs.js       # API documentation
+    ├── pubsub.js         # Google Cloud Pub/Sub interaction
+    ├── secrets.js        # Google Cloud Secret Manager interaction
+    └── errors/           # Custom error classes
+        └── AppError.js
 ```
 
 ### Key Components
@@ -92,292 +115,117 @@ To test the BOE parser manually:
 
 ## Prerequisites
 
-- Node.js 18+
-- Google Cloud Project
-- Docker
-- Access to BOE Analysis Service API key
+- Node.js (v18 or higher recommended)
+- npm
+- Google Cloud Project (for Pub/Sub, Secret Manager, Cloud Run)
+- Docker (optional, for containerized deployment)
 
 ## Environment Variables
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| PORT | Server port number | No | 8080 |
-| GOOGLE_CLOUD_PROJECT | GCP project ID | Yes | - |
-| LOG_LEVEL | Logging level (debug, info, warn, error) | No | debug |
+This service relies on environment variables for configuration. For local development, create a `.env` file in the root directory by copying `.env.example`.
+
+### Required
+
+These variables **must** be set for the application to function correctly.
+
+| Variable | Description | Example Value |
+|---|---|---|
+| `GOOGLE_CLOUD_PROJECT` | Your Google Cloud Project ID. | `my-gcp-project-id` |
+| `PUBSUB_TOPIC_NAME` | The Pub/Sub topic ID where analysis results are published. | `processor-results` |
+| `GEMINI_API_KEY` | API Key for Google AI (Gemini). **Set directly or via Secret Manager.** | `AIza...` |
+| `OPENAI_API_KEY` | API Key for OpenAI. **Set directly or via Secret Manager.** | `sk-...` |
+| `API_KEY` | The secret key clients must provide in the `Authorization: Bearer <key>` header. **Set directly or via Secret Manager.** | `my-secret-bearer-token` |
+
+**Note on API Keys:** In production (when `NODE_ENV=production`), the application will attempt to load `GEMINI_API_KEY`, `OPENAI_API_KEY`, and `API_KEY` from Google Cloud Secret Manager using secrets with the *exact same names* as the environment variables. If running locally or if Secret Manager access fails, it falls back to the direct environment variable values.
+
+### Optional
+
+These variables have default values but can be overridden.
+
+| Variable | Description | Default |
+|---|---|---|
+| `NODE_ENV` | Environment mode (`development` or `production`). Affects logging, secret loading. | `development` |
+| `PORT` | Port the server listens on. Cloud Run injects its own. | `3000` |
+| `PUBSUB_DLQ_TOPIC_NAME` | The Pub/Sub topic ID for publishing errors/DLQ messages. | `${PUBSUB_TOPIC_NAME}-dlq` |
+| `GEMINI_MODEL` | The specific Gemini model to use. | `gemini-1.5-pro` |
+| `OPENAI_MODEL` | The specific OpenAI model to use. | `gpt-4o-mini` |
+| `OPENAI_ORGANIZATION` | OpenAI Organization ID (if applicable). | *empty* |
+| `SCRAPER_TIMEOUT_MS` | Timeout in milliseconds for fetching BOE content. | `15000` |
+| `SCRAPER_USER_AGENT` | User-Agent string for the BOE scraper. | `BOE Parser Bot/1.0` |
 
 ## Setup
 
-1. Clone the repository:
-   ```bash
-   git clone [repository-url]
-   cd boe-analysis-service
-   ```
+1.  Clone the repository:
+    ```bash
+    git clone [repository-url]
+    cd boe-parser # Or your project directory name
+    ```
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
 
-3. Configure Google Cloud Secret Manager:
-   - Set up `PARSER_API_KEY` secret for API authentication
+3.  Configure Environment:
+    *   Copy `.env.example` to `.env`.
+    *   Fill in the required values in `.env` (especially API keys for local testing).
+    *   **For Production/Cloud Run:** Set the required environment variables in the Cloud Run service configuration. If using Secret Manager for API keys, ensure the secrets exist and the Cloud Run service account has the "Secret Manager Secret Accessor" IAM role.
 
-4. Build the Docker image:
-   ```bash
-   docker build -t boe-analysis-service .
-   ```
+## Running Locally
 
-## Deployment
+```bash
+# Start the server (using .env variables)
+npm start
 
-### Google Cloud Run
-
-1. Push the image to Container Registry:
-   ```bash
-   gcloud builds submit --tag gcr.io/PROJECT_ID/boe-analysis-service
-   ```
-
-2. Deploy to Cloud Run:
-   ```bash
-   gcloud run deploy boe-analysis-service \
-     --image gcr.io/PROJECT_ID/boe-analysis-service \
-     --platform managed \
-     --region REGION \
-     --project PROJECT_ID \
-     --set-env-vars GOOGLE_CLOUD_PROJECT=PROJECT_ID
-   ```
-
-## API Usage
-
-### Authentication
-
-All requests require an API key in the Authorization header:
-
-```http
-Authorization: Bearer YOUR_API_KEY
+# Start in development mode with auto-reloading
+npm run dev
 ```
 
-### Endpoints
+The server will typically start on port 3000 (or the `PORT` specified).
 
-#### 1. Get API Documentation
-```
-GET /help
-```
+## Deployment (Google Cloud Run Example)
 
-Returns comprehensive API documentation.
+1.  Ensure your `gcloud` CLI is configured (project, authentication).
+2.  Push the image to Google Artifact Registry (or Container Registry):
+    ```bash
+    # Replace REGION and PROJECT_ID
+    gcloud builds submit --tag REGION-docker.pkg.dev/PROJECT_ID/boe-parser/boe-parser-image:latest
+    ```
+3.  Deploy to Cloud Run:
+    ```bash
+    # Replace REGION, PROJECT_ID, and set appropriate variables
+    gcloud run deploy boe-parser-service \
+      --image REGION-docker.pkg.dev/PROJECT_ID/boe-parser/boe-parser-image:latest \
+      --platform managed \
+      --region REGION \
+      --project PROJECT_ID \
+      --allow-unauthenticated \ # Or configure authentication
+      --set-env-vars NODE_ENV=production,GOOGLE_CLOUD_PROJECT=PROJECT_ID,PUBSUB_TOPIC_NAME=processor-results,PUBSUB_DLQ_TOPIC_NAME=processor-results-dlq \ # Add other OPTIONAL vars if needed
+      # Set secrets if using Secret Manager for API Keys (replace SECRET_NAME with actual secret name)
+      --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,API_KEY=API_KEY:latest
+    ```
+    *   Adjust `--allow-unauthenticated` based on your needs.
+    *   Use `--set-env-vars` for non-sensitive configuration.
+    *   Use `--set-secrets` to securely mount secrets from Secret Manager as environment variables. The format is `ENV_VAR_NAME=SECRET_NAME:VERSION`. Use the actual name of your secret in Secret Manager.
 
-#### 2. Analyze BOE Content
-```
-POST /analyze-text
-Content-Type: application/json
-```
+## API Endpoints
 
-Analyze multiple queries against the latest BOE content.
+(Refer to `ENDPOINTS.md` or previous sections for details - keep this concise)
 
-Request body:
-```json
-{
-  "texts": [
-    "Find all resolutions about public employment",
-    "List announcements about environmental grants",
-    "Show orders related to education"
-  ],
-  "metadata": {
-    "user_id": "uuid-v4-here",
-    "subscription_id": "uuid-v4-here"
-  }
-}
-```
-
-#### 3. Test Analyze (Test Environment Only)
-```
-POST /test-analyze
-Content-Type: application/json
-```
-
-Test endpoint that triggers the full BOE analysis process and returns detailed diagnostics.
-
-#### 4. Test PubSub Integration (Test Environment Only)
-```
-POST /test-pubsub
-Content-Type: application/json
-```
-
-Fast test endpoint that can simulate PubSub messages using sample BOE data.
-
-```json
-{
-  "texts": ["Ayuntamiento Barcelona licitaciones"],
-  "skipAI": true,  // Optional: Use mock data instead of real AI processing
-  "publishToPubSub": true  // Optional: Publish results to PubSub
-}
-```
-
-Response Format:
-
-```json
-{
-  "query_date": "2025-02-11",
-  "boe_info": {
-    "issue_number": "36",
-    "publication_date": "2025-02-11",
-    "source_url": "https://www.boe.es"
-  },
-  "results": [
-    {
-      "prompt": "Find all resolutions about public employment",
-      "matches": [
-        {
-          "document_type": "RESOLUTION",
-          "issuing_body": "Ministerio de Hacienda",
-          "title": "Full document title",
-          "dates": {
-            "document_date": "2025-02-10",
-            "publication_date": "2025-02-11"
-          },
-          "code": "BOE-A-2025-1234",
-          "section": "III. Otras disposiciones",
-          "department": "MINISTERIO DE HACIENDA",
-          "links": {
-            "pdf": "https://www.boe.es/boe/dias/2025/02/11/pdfs/BOE-A-2025-1234.pdf",
-            "html": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-1234"
-          },
-          "relevance_score": 0.95,
-          "summary": "Brief description of the document content"
-        }
-      ],
-      "metadata": {
-        "match_count": 1,
-        "max_relevance": 0.95
-      }
-    }
-  ],
-  "metadata": {
-    "total_items_processed": 45,
-    "processing_time_ms": 1234
-  }
-}
-```
-
-### PubSub Message Format
-
-The service publishes analysis results to PubSub following a standardized message schema shared between all NIFYA services. This ensures compatibility between the boe-parser and notification-worker.
-
-For the complete and up-to-date schema documentation, see:
-- [NIFYA PubSub Message Schema Documentation](/docs/pubsub-structure.md)
-
-**Example of a successful message:**
-
-```json
-{
-  "version": "1.0",
-  "processor_type": "boe",
-  "timestamp": "2025-02-11T12:27:36Z",
-  "trace_id": "uuid-v4-here",
-  "request": {
-    "subscription_id": "uuid-v4-here",
-    "processing_id": "unique-processing-id",
-    "user_id": "uuid-v4-here",
-    "prompts": ["search prompt 1", "search prompt 2"]
-  },
-  "results": {
-    "query_date": "2025-02-11",
-    "matches": [
-      {
-        "prompt": "search prompt 1",
-        "documents": [
-          {
-            "document_type": "boe_document",
-            "title": "Document Title",
-            "summary": "Document Summary",
-            "relevance_score": 0.95,
-            "links": {
-              "html": "https://example.com/doc.html",
-              "pdf": "https://example.com/doc.pdf"
-            },
-            "publication_date": "2025-02-11T00:00:00.000Z",
-            "section": "II.B",
-            "bulletin_type": "BOE"
-          }
-        ]
-      }
-    ]
-  },
-  "metadata": {
-    "processing_time_ms": 1500,
-    "total_items_processed": 1936,
-    "total_matches": 5,
-    "model_used": "gemini-2.0-pro-exp-02-05",
-    "status": "success",
-    "error": null
-  }
-}
-```
-
-**Error messages** follow the same structure with `status: "error"` and error details in the metadata:
-
-```json
-{
-  "version": "1.0",
-  "processor_type": "boe",
-  "timestamp": "2025-02-11T12:27:36Z",
-  "trace_id": "uuid-v4-here",
-  "request": {
-    "subscription_id": "uuid-v4-here",
-    "processing_id": "unique-processing-id",
-    "user_id": "uuid-v4-here",
-    "prompts": ["search prompt 1"]
-  },
-  "results": {
-    "query_date": "2025-02-11",
-    "matches": []
-  },
-  "metadata": {
-    "processing_time_ms": 1500,
-    "total_items_processed": 0,
-    "total_matches": 0,
-    "model_used": "gemini-2.0-pro-exp-02-05",
-    "status": "error",
-    "error": "Error description"
-  }
-}
-```
-
-## Rate Limits
-
-- 100 requests per minute per API key
-- Maximum 5 queries per request
-- Maximum query length: 500 characters
-
-## Error Handling
-
-The service uses standard HTTP status codes:
-
-- `200`: Success
-- `400`: Bad Request
-- `401`: Unauthorized
-- `429`: Too Many Requests
-- `500`: Internal Server Error
-
-API Error Response Format:
-```json
-{
-  "error": "Descriptive error message"
-}
-```
+-   `GET /health`: Health check.
+-   `POST /api/analyze-text`: Main analysis endpoint (Requires `Authorization: Bearer <API_KEY>`).
+-   `GET /api/check-gemini`: Test Gemini connection (Requires Auth).
+-   `GET /api/check-openai`: Test OpenAI connection (Requires Auth).
+-   `POST /api/test-pubsub`: Test publishing a mock message (Requires Auth).
 
 ## Development
 
 ```bash
-# Start development server
-npm run dev
-
-# Run tests
-npm test
-
-# Lint code
+# Run linting checks
 npm run lint
 
-# Run PubSub test
-node test-pubsub.js
+# Run tests (if configured in package.json)
+npm test
 ```
 
 ## Security
