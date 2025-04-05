@@ -11,20 +11,25 @@ dotenv.config();
 
 // Helper function to read mounted secrets (common in Cloud Run)
 function readMountedSecret(secretName) {
-  // Default path where Cloud Run mounts secrets passed via --set-secrets
   const defaultSecretPath = `/etc/secrets/${secretName}`;
-  // Allow overriding path via environment variable if needed (optional)
   const secretPath = process.env[`${secretName}_FILE`] || defaultSecretPath;
   try {
     if (fs.existsSync(secretPath)) {
-      console.log(`Reading secret from mounted file: ${secretPath}`);
-      return fs.readFileSync(secretPath, 'utf8').trim();
+      const value = fs.readFileSync(secretPath, 'utf8').trim();
+      if (value) {
+          console.log(`SUCCESS: Read secret '${secretName}' from mounted file: ${secretPath}`);
+          return value;
+      } else {
+          console.warn(`WARN: Found mounted secret file for '${secretName}' but it is empty: ${secretPath}`);
+          return null;
+      }
+    } else {
+      return null;
     }
   } catch (e) {
-    // Log warning but don't crash if file reading fails
-    console.warn(`Could not read mounted secret file ${secretPath}: ${e.message}`);
+    console.warn(`ERROR: Could not read mounted secret file ${secretPath} for '${secretName}': ${e.message}`);
   }
-  return null; // Return null if file doesn't exist or isn't readable
+  return null;
 }
 
 // Environment constants
@@ -46,29 +51,28 @@ const config = {
   server: {
     port: process.env.PORT || 3000,
   },
-  gcp: { // Added GCP section for clarity
+  gcp: {
     projectId: process.env.GOOGLE_CLOUD_PROJECT || '',
   },
   services: {
     gemini: {
-      apiKey: process.env.GEMINI_API_KEY || readMountedSecret('GEMINI_API_KEY') || '', // Check env, then file
+      apiKey: process.env.GEMINI_API_KEY || '',
       model: process.env.GEMINI_MODEL || 'gemini-1.5-pro',
     },
     openai: {
-      apiKey: process.env.OPENAI_API_KEY || readMountedSecret('OPENAI_API_KEY') || '', // Check env, then file
+      apiKey: process.env.OPENAI_API_KEY || '',
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       organization: process.env.OPENAI_ORGANIZATION || '',
     },
     pubsub: {
-      topicId: pubsubTopicName, // Use the loaded topic name
-      errorTopicId: pubsubDlqTopicName, // Use the loaded DLQ topic name
-      // projectId is now under gcp section
+      topicId: pubsubTopicName,
+      errorTopicId: pubsubDlqTopicName,
     },
   },
   auth: {
-    apiKey: process.env.API_KEY || readMountedSecret('API_KEY') || '', // Check env, then file
+    apiKey: process.env.API_KEY || '',
   },
-  scraper: { // Added scraper config section
+  scraper: {
       timeout: parseInt(process.env.SCRAPER_TIMEOUT_MS || '15000', 10),
       userAgent: process.env.SCRAPER_USER_AGENT || 'BOE Parser Bot/1.0'
   }
@@ -200,4 +204,5 @@ export function validateConfig() {
   return missingKeys;
 }
 
+export { loadSecrets, validateConfig };
 export default config;
