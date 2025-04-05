@@ -204,5 +204,4 @@ export function validateConfig() {
   return missingKeys;
 }
 
-export { loadSecrets, validateConfig };
 export default config;
