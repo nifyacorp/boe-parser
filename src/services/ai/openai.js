@@ -5,7 +5,7 @@ import { getOpenAIClient } from './client.js';
 import config from '../../config/config.js';
 import { createSystemPrompt, createUserPrompt } from './prompts/openai.js';
 import OpenAI from 'openai';
-import { createAIServiceError } from '../../utils/errors/AppError.js';
+import { createExternalApiError, createServiceError } from '../../utils/errors/AppError.js';
 
 /**
  * Create OpenAI API payload
@@ -92,9 +92,11 @@ export async function analyzeWithOpenAI(boeItems, prompt, requestId, options = {
     if (!completion.choices || completion.choices.length === 0 || !completion.choices[0].message?.content) {
       // Replaced logger.error with console.error
       console.error(`OpenAI analysis failed: No response content - Request ID: ${requestId}, Full Completion:`, completion);
-      throw createAIServiceError('OpenAI API returned no content', {
+      // Use createExternalApiError for API response issues
+      throw createExternalApiError('OpenAI API returned no content', {
         code: 'OPENAI_NO_CONTENT',
-        details: { finishReason: completion.choices?.[0]?.finish_reason }
+        details: { finishReason: completion.choices?.[0]?.finish_reason },
+        service: 'OpenAI'
       });
     }
 
@@ -119,7 +121,8 @@ export async function analyzeWithOpenAI(boeItems, prompt, requestId, options = {
       }
     } catch (parseError) {
       console.error(`Failed to parse OpenAI JSON response - Request ID: ${requestId}, Error:`, parseError, `Response Text: ${responseText.substring(0, 500)}`);
-      throw createAIServiceError('Failed to parse OpenAI response', {
+      // Use createServiceError for internal parsing issues
+      throw createServiceError('Failed to parse OpenAI response', {
         code: 'OPENAI_PARSE_ERROR',
         cause: parseError,
         details: { responseTextPreview: responseText.substring(0, 500) }
@@ -143,25 +146,28 @@ export async function analyzeWithOpenAI(boeItems, prompt, requestId, options = {
     // Catch errors from API call or JSON parsing
     const processingTime = Date.now() - startTime;
     // Replaced logger.error with console.error
-    // Check if it's an already wrapped AIServiceError
-    if (error.code && error.code.startsWith('OPENAI_')) {
+    // Check if it's an AppError from parsing or previous steps
+    if (error instanceof Error && error.code && error.isOperational) {
         console.error(`OpenAI analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Code: ${error.code}, Error:`, error.message);
-        throw error; // Re-throw already wrapped error
+        throw error; // Re-throw already wrapped AppError
     }
-    // Handle specific API errors
+    // Handle specific OpenAI API errors
     else if (error instanceof OpenAI.APIError) {
       console.error(`OpenAI API error - Request ID: ${requestId}, Time: ${processingTime}ms, Status: ${error.status}, Error:`, error.message);
-      throw createAIServiceError(`OpenAI API error: ${error.message}`, {
+      // Use createExternalApiError for OpenAI API errors
+      throw createExternalApiError(`OpenAI API error: ${error.message}`, {
         code: 'OPENAI_API_ERROR',
         status: error.status,
         type: error.type,
-        cause: error
+        cause: error,
+        service: 'OpenAI'
       });
     }
     // Handle other unexpected errors
     else {
         console.error(`Unexpected OpenAI analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
-        throw createAIServiceError(`OpenAI analysis failed: ${error.message}`, {
+        // Use createServiceError for other errors
+        throw createServiceError(`OpenAI analysis failed: ${error.message}`, {
             code: 'OPENAI_ANALYSIS_FAILED',
             cause: error
         });

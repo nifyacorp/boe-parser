@@ -5,7 +5,6 @@ import { getGeminiModel } from './client.js';
 import config from '../../config/config.js';
 import { createSystemPrompt, createContentPrompt } from './prompts/gemini.js';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
-import { systemPrompt, formatPrompt } from './prompts/gemini.js';
 import { createExternalApiError, createServiceError } from '../../utils/errors/AppError.js';
 
 /**
@@ -95,11 +94,12 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
   ];
 
-  const fullPrompt = formatPrompt(boeItems, prompt);
+  const systemMessage = createSystemPrompt(prompt);
+  const contentMessage = createContentPrompt(boeItems, prompt, boeItems.length);
 
   const parts = [
-    { text: systemPrompt },
-    { text: fullPrompt },
+    { text: systemMessage },
+    { text: contentMessage },
   ];
 
   try {
