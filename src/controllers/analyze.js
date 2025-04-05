@@ -6,49 +6,6 @@ import logger from '../utils/logger.js';
 import { parseBOE } from '../services/parser/index.js';
 import { analyzeBOEItems } from '../services/ai/index.js';
 import { publishResults } from '../utils/pubsub.js';
-import { createValidationError } from '../utils/errors/AppError.js';
-
-/**
- * Validate analyze request
- * @param {Object} reqBody - Request body 
- * @returns {Array|null} - Error messages or null if valid
- */
-function validateAnalyzeRequest(reqBody) {
-  const errors = [];
-  
-  // Check that texts are provided
-  if (!reqBody.texts) {
-    errors.push('texts field is required');
-  } else if (!Array.isArray(reqBody.texts)) {
-    errors.push('texts must be an array');
-  } else if (reqBody.texts.length === 0) {
-    errors.push('texts array cannot be empty');
-  }
-  
-  // Check subscription_id if provided
-  if (reqBody.subscription_id && typeof reqBody.subscription_id !== 'string') {
-    errors.push('subscription_id must be a string');
-  }
-  
-  // Check user_id if provided
-  if (reqBody.user_id && typeof reqBody.user_id !== 'string') {
-    errors.push('user_id must be a string');
-  }
-  
-  // Check date if provided
-  if (reqBody.date && typeof reqBody.date !== 'string') {
-    errors.push('date must be a string in YYYY-MM-DD format');
-  } else if (reqBody.date && !/^\d{4}-\d{2}-\d{2}$/.test(reqBody.date)) {
-    errors.push('date must be in YYYY-MM-DD format');
-  }
-  
-  // Check service if provided
-  if (reqBody.service && !['gemini', 'openai'].includes(reqBody.service)) {
-    errors.push('service must be either "gemini" or "openai"');
-  }
-  
-  return errors.length > 0 ? errors : null;
-}
 
 /**
  * Handle analyze text request
@@ -58,12 +15,8 @@ function validateAnalyzeRequest(reqBody) {
  */
 export async function analyzeText(req, res, next) {
   try {
-    // Validate request
-    const validationErrors = validateAnalyzeRequest(req.body);
-    if (validationErrors) {
-      throw createValidationError('Invalid request body', { errors: validationErrors });
-    }
-    
+    // Validation is now handled by middleware
+
     const { texts, subscription_id, user_id, date, service } = req.body;
     
     // Generate trace ID for tracking
@@ -114,6 +67,8 @@ export async function analyzeText(req, res, next) {
       }
     };
     
+    // TODO: Consider moving PubSub publishing to a dedicated service or event handler
+    //       for better decoupling and potentially more robust error/retry handling.
     // Publish results to PubSub asynchronously
     publishResults(response).catch(error => {
       logger.error({
@@ -140,6 +95,7 @@ export async function analyzeText(req, res, next) {
 export async function testAnalyze(req, res, next) {
   try {
     // Reuse main analyze function with diagnostic flag
+    // Validation is implicitly handled because analyzeText is called
     req.body.diagnostic = true;
     
     // Continue to main analyze handler

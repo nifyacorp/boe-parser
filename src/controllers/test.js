@@ -8,6 +8,12 @@ import { getOpenAIClient } from '../services/ai/client.js';
 import { publishResults } from '../utils/pubsub.js';
 import config from '../config/config.js';
 
+// NOTE: These test functions directly interact with AI clients (getGeminiModel, getOpenAIClient)
+//       to specifically test the connection to each service. This differs from the main
+//       analyze controller which uses the src/services/ai/index.js facade.
+//       If the purpose of these tests changes to testing the full analysis flow,
+//       consider refactoring to use the analyzeBOEItems facade.
+
 /**
  * Test Gemini API connection
  * @param {Object} req - Express request
