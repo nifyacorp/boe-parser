@@ -336,6 +336,245 @@ app.post('/test-analyze', async (req, res) => {
   }
 });
 
+// Fast test endpoint that simulates the subscription flow without slow external BOE fetching
+app.post('/test-pubsub', async (req, res) => {
+  const reqId = req.id;
+  const startTime = Date.now();
+  
+  try {
+    logger.info({ reqId }, 'PubSub test endpoint triggered');
+    
+    // Get parameters from request or use defaults
+    const texts = req.body.texts || ["Ayuntamiento Barcelona licitaciones"];
+    const userId = req.body.userId || req.body.user_id || "65c6074d-dbc4-4091-8e45-b6aecffd9ab9";
+    const subscriptionId = req.body.subscriptionId || req.body.subscription_id || "bbcde7bb-bc04-4a0b-8c47-01682a31cc15";
+    const skipAI = req.body.skipAI === true; // Skip AI processing if specifically requested
+    
+    logger.info({ 
+      reqId, 
+      userId, 
+      subscriptionId, 
+      textsCount: texts.length,
+      skipAI
+    }, 'Processing PubSub test with parameters');
+    
+    // Create sample BOE content without external fetching
+    const sampleBoeItems = [
+      {
+        id: "BOE-B-2025-12345",
+        title: "Licitación para la contratación del servicio de mantenimiento de parques y jardines del Ayuntamiento de Barcelona",
+        content: "El Ayuntamiento de Barcelona anuncia licitación pública para la contratación del servicio de mantenimiento de parques y jardines municipales por un período de 24 meses con posibilidad de prórroga.",
+        section: "Sección 5ª. Anuncios y Licitaciones",
+        department: "Ayuntamiento de Barcelona",
+        document_type: "Licitación",
+        publication_date: new Date().toISOString().split('T')[0],
+        links: {
+          html: "https://www.boe.es/diario_boe/txt.php?id=BOE-B-2025-12345",
+          pdf: "https://www.boe.es/boe/dias/2025/04/05/pdfs/BOE-B-2025-12345.pdf"
+        }
+      },
+      {
+        id: "BOE-B-2025-12346",
+        title: "Subvenciones para proyectos culturales del Ministerio de Cultura",
+        content: "Resolución del Ministerio de Cultura por la que se convocan subvenciones para proyectos culturales durante el año 2025.",
+        section: "Sección 3ª. Otras disposiciones",
+        department: "Ministerio de Cultura",
+        document_type: "Subvención", 
+        publication_date: new Date().toISOString().split('T')[0],
+        links: {
+          html: "https://www.boe.es/diario_boe/txt.php?id=BOE-B-2025-12346",
+          pdf: "https://www.boe.es/boe/dias/2025/04/05/pdfs/BOE-B-2025-12346.pdf"
+        }
+      },
+      {
+        id: "BOE-A-2025-54321",
+        title: "Nombramiento de personal directivo en el Ayuntamiento de Barcelona",
+        content: "Resolución del Ayuntamiento de Barcelona por la que se publica el nombramiento de personal directivo para el área de desarrollo urbano sostenible.",
+        section: "Sección 2ª. Autoridades y personal",
+        department: "Ayuntamiento de Barcelona",
+        document_type: "Nombramiento",
+        publication_date: new Date().toISOString().split('T')[0],
+        links: {
+          html: "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-54321",
+          pdf: "https://www.boe.es/boe/dias/2025/04/05/pdfs/BOE-A-2025-54321.pdf"
+        }
+      }
+    ];
+    
+    // Create a response structure similar to what scrapeWebsite would return
+    const mockBoeContent = {
+      boeInfo: {
+        date: new Date().toISOString().split('T')[0],
+        publication_number: "BOE-S-2025-" + Math.floor(Math.random() * 1000),
+        url: "https://www.boe.es/boe/dias/2025/04/05/"
+      },
+      items: sampleBoeItems
+    };
+    
+    logger.info({ reqId, mockItems: mockBoeContent.items.length }, 'Created mock BOE content');
+    
+    const results = [];
+    
+    // If skipAI is true, generate mock analysis results
+    // Otherwise, run through the actual AI analysis pipeline
+    if (skipAI) {
+      logger.info({ reqId }, 'Skipping AI processing, using mock analysis results');
+      
+      // Create mock results for each text prompt based on the sample data
+      for (const text of texts) {
+        const cleanText = processText(text);
+        
+        // Generate mock matches by simple keyword matching
+        const matches = sampleBoeItems
+          .filter(item => {
+            const combinedText = (item.title + " " + item.content + " " + item.department).toLowerCase();
+            const keywords = cleanText.toLowerCase().split(/\s+/).filter(k => k.length > 3);
+            // Match if any keyword appears in the text
+            return keywords.some(keyword => combinedText.includes(keyword));
+          })
+          .map(item => ({
+            document_type: item.document_type,
+            title: item.title,
+            notification_title: `${item.document_type}: ${item.title.substring(0, 50)}${item.title.length > 50 ? '...' : ''}`,
+            issuing_body: item.department,
+            summary: item.content,
+            relevance_score: Math.random() * 0.5 + 0.5, // Random score between 0.5 and 1.0
+            links: item.links,
+            dates: {
+              publication_date: item.publication_date
+            },
+            department: item.department,
+            section: item.section
+          }));
+        
+        results.push({
+          prompt: text,
+          cleanText,
+          matches: matches,
+          metadata: {
+            processing_type: "mock",
+            match_count: matches.length
+          }
+        });
+      }
+    } else {
+      // Process with real AI analysis
+      logger.info({ reqId, promptCount: texts.length }, 'Processing with real AI analysis');
+      
+      for (let i = 0; i < texts.length; i++) {
+        try {
+          // Process the input text
+          const text = texts[i];
+          logger.info({ reqId, promptIndex: i, text }, 'Processing input text');
+          const cleanText = processText(text);
+          
+          // Analyze with Gemini
+          logger.info({ reqId, promptIndex: i }, 'Starting Gemini analysis');
+          const analysis = await analyzeWithGemini(mockBoeContent.items, cleanText, reqId, {
+            metadata: {
+              user_id: userId,
+              subscription_id: subscriptionId
+            }
+          });
+          
+          results.push({
+            prompt: text,
+            cleanText,
+            matches: analysis.matches,
+            metadata: analysis.metadata
+          });
+        } catch (promptError) {
+          logger.error({ 
+            reqId, 
+            promptIndex: i, 
+            error: promptError.message,
+            stack: promptError.stack 
+          }, 'Error processing prompt with AI');
+          
+          // Add empty result with error
+          results.push({
+            prompt: texts[i],
+            cleanText: processText(texts[i]),
+            matches: [],
+            error: promptError.message,
+            metadata: {
+              error: true,
+              error_message: promptError.message
+            }
+          });
+        }
+      }
+    }
+    
+    // Prepare diagnostic response
+    const processingTime = Date.now() - startTime;
+    
+    // Create a standardized PubSub message
+    const publishPayload = {
+      trace_id: reqId,
+      request: {
+        texts,
+        user_id: userId,
+        subscription_id: subscriptionId
+      },
+      results: {
+        query_date: new Date().toISOString().split('T')[0],
+        matches: results.flatMap(r => r.matches.map(m => ({
+          ...m,
+          prompt: r.prompt
+        })))
+      },
+      processor_type: "boe",
+      metadata: {
+        processing_time_ms: processingTime,
+        total_items_processed: mockBoeContent.items.length,
+        is_test: true,
+        skip_ai: skipAI
+      }
+    };
+    
+    // Publish to PubSub if requested
+    let messageId = null;
+    if (req.body.publishToPubSub === true) {
+      try {
+        messageId = await publishResults(publishPayload);
+        logger.info({ reqId, messageId }, 'Test results published to PubSub');
+      } catch (pubsubError) {
+        logger.error({ reqId, error: pubsubError.message }, 'Failed to publish test results to PubSub');
+        publishPayload.pubsub_error = pubsubError.message;
+      }
+    }
+    
+    const response = {
+      status: "success",
+      reqId,
+      timestamp: new Date().toISOString(),
+      processing_time_ms: processingTime,
+      pubsub_message_id: messageId,
+      message_payload: publishPayload,
+      results_summary: {
+        prompt_count: texts.length,
+        total_matches: publishPayload.results.matches.length,
+        matches_per_prompt: results.map(r => ({
+          prompt: r.prompt,
+          match_count: r.matches.length
+        }))
+      }
+    };
+    
+    res.json(response);
+    
+  } catch (error) {
+    logger.error({ reqId, error: error.message, stack: error.stack }, 'PubSub test endpoint error');
+    res.status(500).json({ 
+      status: "error",
+      error: error.message, 
+      reqId,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.post('/analyze-text', async (req, res) => {
   const reqId = req.id;
   const startTime = Date.now();

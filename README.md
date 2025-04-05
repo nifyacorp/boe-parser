@@ -42,6 +42,54 @@ src/
 - **Logger**: Structured logging with detailed context
 - **Secret Manager**: Secure credential management
 
+## Testing the Service
+
+### Using the CLI Test Script
+
+A test script is provided to easily test the BOE parser's PubSub integration:
+
+```bash
+# Run with mock data (fast)
+node test-pubsub.js --skipAI
+
+# Run with real AI processing (slower)
+node test-pubsub.js
+
+# Publish results to PubSub for end-to-end testing
+node test-pubsub.js --publish
+
+# Use custom prompts
+node test-pubsub.js --prompt="Ayuntamiento Barcelona" --prompt="Subvenciones cultura"
+
+# Get help
+node test-pubsub.js --help
+```
+
+### Manual Testing
+
+To test the BOE parser manually:
+
+1. Test the health endpoint:
+   ```
+   curl http://localhost:8080/health
+   ```
+
+2. Test the PubSub endpoint with mock data:
+   ```
+   curl -X POST http://localhost:8080/test-pubsub \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer test-api-key" \
+     -d '{"texts":["Ayuntamiento Barcelona licitaciones"], "skipAI": true}'
+   ```
+
+3. Test with real AI processing and publish to PubSub:
+   ```
+   curl -X POST http://localhost:8080/test-pubsub \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer test-api-key" \
+     -d '{"texts":["Ayuntamiento Barcelona licitaciones"], "publishToPubSub": true}'
+   ```
+
 ## Prerequisites
 
 - Node.js 18+
@@ -136,6 +184,30 @@ Request body:
     "user_id": "uuid-v4-here",
     "subscription_id": "uuid-v4-here"
   }
+}
+```
+
+#### 3. Test Analyze (Test Environment Only)
+```
+POST /test-analyze
+Content-Type: application/json
+```
+
+Test endpoint that triggers the full BOE analysis process and returns detailed diagnostics.
+
+#### 4. Test PubSub Integration (Test Environment Only)
+```
+POST /test-pubsub
+Content-Type: application/json
+```
+
+Fast test endpoint that can simulate PubSub messages using sample BOE data.
+
+```json
+{
+  "texts": ["Ayuntamiento Barcelona licitaciones"],
+  "skipAI": true,  // Optional: Use mock data instead of real AI processing
+  "publishToPubSub": true  // Optional: Publish results to PubSub
 }
 ```
 
@@ -303,6 +375,9 @@ npm test
 
 # Lint code
 npm run lint
+
+# Run PubSub test
+node test-pubsub.js
 ```
 
 ## Security
