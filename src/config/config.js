@@ -89,17 +89,28 @@ export async function loadSecrets() {
   console.log('Production environment. Checking if secrets need fetching via API...');
 
   const secretsToFetch = [];
+  // Define the mapping between config paths and actual Secret Manager names
+  const secretMap = {
+      'services.gemini.apiKey': 'GEMINI_API_KEY',
+      'services.openai.apiKey': 'OPENAI_API_KEY',
+      'auth.apiKey': 'BOE_API_KEY' // Use the correct secret name here
+      // Add other mappings if needed
+  };
+
   // Check if keys loaded initially (from env/file) are still missing
-  if (!config.services.gemini.apiKey) secretsToFetch.push({ secretName: 'GEMINI_API_KEY', configPath: 'services.gemini.apiKey' });
-  if (!config.services.openai.apiKey) secretsToFetch.push({ secretName: 'OPENAI_API_KEY', configPath: 'services.openai.apiKey' });
-  if (!config.auth.apiKey) secretsToFetch.push({ secretName: 'API_KEY', configPath: 'auth.apiKey' });
+  if (!config.services.gemini.apiKey) secretsToFetch.push({ configPath: 'services.gemini.apiKey' });
+  if (!config.services.openai.apiKey) secretsToFetch.push({ configPath: 'services.openai.apiKey' });
+  if (!config.auth.apiKey) secretsToFetch.push({ configPath: 'auth.apiKey' });
 
   if (secretsToFetch.length === 0) {
     console.log('Required API keys seem to be loaded already (from env vars or mounted files). Skipping Secret Manager API calls.');
     return;
   }
 
-  console.log('Attempting to load missing secrets from Secret Manager API:', secretsToFetch.map(s => s.secretName));
+  // Get the actual secret names for the ones we need to fetch
+  const secretsToFetchWithNames = secretsToFetch.map(s => ({ ...s, secretName: secretMap[s.configPath] }));
+
+  console.log('Attempting to load missing secrets from Secret Manager API:', secretsToFetchWithNames.map(s => s.secretName));
 
   try {
     const client = new SecretManagerServiceClient();
@@ -112,9 +123,14 @@ export async function loadSecrets() {
 
     console.log(`Loading secrets via API from project: ${projectId}`);
 
-    for (const secret of secretsToFetch) {
+    // Use the mapped secret names
+    for (const secret of secretsToFetchWithNames) {
+      if (!secret.secretName) {
+          console.warn(`No Secret Manager name mapping found for config path: ${secret.configPath}`);
+          continue;
+      }
       const secretResourceName = `projects/${projectId}/secrets/${secret.secretName}/versions/latest`;
-      console.log(`Accessing secret via API: ${secret.secretName} (${secretResourceName})`);
+      console.log(`Accessing secret via API: ${secret.secretName} (${secretResourceName}) for config path ${secret.configPath}`);
       try {
           const [version] = await client.accessSecretVersion({ name: secretResourceName });
           if (version.payload?.data) {
@@ -125,7 +141,7 @@ export async function loadSecrets() {
               current = current[keys[i]] = current[keys[i]] || {};
             }
             current[keys[keys.length - 1]] = value;
-            console.log(`Successfully loaded secret via API: ${secret.secretName}`);
+            console.log(`Successfully loaded secret via API: ${secret.secretName} into ${secret.configPath}`);
           } else {
             console.warn(`Secret payload empty via API for: ${secret.secretName}`);
           }
