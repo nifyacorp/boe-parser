@@ -2,7 +2,6 @@
  * Test endpoint controllers
  */
 import { randomUUID } from 'crypto';
-import logger from '../utils/logger.js';
 import { getGeminiModel } from '../services/ai/client.js';
 import { getOpenAIClient } from '../services/ai/client.js';
 import { publishResults } from '../utils/pubsub.js';
@@ -24,10 +23,7 @@ export async function testGemini(req, res, next) {
   try {
     const startTime = Date.now();
     
-    logger.info({
-      requestId: req.id,
-      test: 'gemini'
-    }, 'Testing Gemini API connection');
+    console.log(`Testing Gemini API connection - Request ID: ${req.id}`);
     
     // Get Gemini model and test with a simple prompt
     const model = getGeminiModel();
@@ -60,19 +56,11 @@ export async function testGemini(req, res, next) {
       }
     };
     
-    logger.info({
-      requestId: req.id,
-      processingTime,
-      model: config.services.gemini.model,
-      responsePreview: responseText.substring(0, 100)
-    }, 'Gemini API test completed successfully');
+    console.log(`Gemini API test completed successfully - Request ID: ${req.id}, Processing Time: ${processingTime}ms, Model: ${config.services.gemini.model}, Response Preview: ${responseText.substring(0, 100)}`);
     
     res.json(apiResponse);
   } catch (error) {
-    logger.error({
-      requestId: req.id,
-      error
-    }, 'Gemini API test failed');
+    console.error(`Gemini API test failed - Request ID: ${req.id}, Error:`, error);
     
     // Pass to error handler
     next(error);
@@ -89,10 +77,7 @@ export async function testOpenAI(req, res, next) {
   try {
     const startTime = Date.now();
     
-    logger.info({
-      requestId: req.id,
-      test: 'openai'
-    }, 'Testing OpenAI API connection');
+    console.log(`Testing OpenAI API connection - Request ID: ${req.id}`);
     
     // Get OpenAI client and test with a simple prompt
     const client = getOpenAIClient();
@@ -122,19 +107,11 @@ export async function testOpenAI(req, res, next) {
       }
     };
     
-    logger.info({
-      requestId: req.id,
-      processingTime,
-      model: config.services.openai.model,
-      usage: response.usage
-    }, 'OpenAI API test completed successfully');
+    console.log(`OpenAI API test completed successfully - Request ID: ${req.id}, Processing Time: ${processingTime}ms, Model: ${config.services.openai.model}, Usage:`, response.usage);
     
     res.json(apiResponse);
   } catch (error) {
-    logger.error({
-      requestId: req.id,
-      error
-    }, 'OpenAI API test failed');
+    console.error(`OpenAI API test failed - Request ID: ${req.id}, Error:`, error);
     
     // Pass to error handler
     next(error);
@@ -155,11 +132,7 @@ export async function testPubSub(req, res, next) {
     const userId = req.body.user_id || 'test-user';
     const prompts = req.body.texts || ['Test prompt'];
     
-    logger.info({
-      requestId: req.id,
-      traceId,
-      test: 'pubsub'
-    }, 'Testing PubSub integration');
+    console.log(`Testing PubSub integration - Request ID: ${req.id}, Trace ID: ${traceId}`);
     
     // Create test matches
     const testMatches = [
@@ -209,11 +182,7 @@ export async function testPubSub(req, res, next) {
     // Publish to PubSub
     const messageId = await publishResults(payload);
     
-    logger.info({
-      requestId: req.id,
-      messageId,
-      traceId
-    }, 'Test message published to PubSub successfully');
+    console.log(`Test message published to PubSub successfully - Request ID: ${req.id}, Message ID: ${messageId}, Trace ID: ${traceId}`);
     
     // Create response
     const response = {
@@ -229,10 +198,7 @@ export async function testPubSub(req, res, next) {
     
     res.json(response);
   } catch (error) {
-    logger.error({
-      requestId: req.id,
-      error
-    }, 'PubSub test failed');
+    console.error(`PubSub test failed - Request ID: ${req.id}, Error:`, error);
     
     // Pass to error handler
     next(error);

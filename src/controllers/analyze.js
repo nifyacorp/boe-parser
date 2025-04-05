@@ -2,7 +2,6 @@
  * BOE analysis controller
  */
 import { randomUUID } from 'crypto';
-import logger from '../utils/logger.js';
 import { parseBOE } from '../services/parser/index.js';
 import { analyzeBOEItems } from '../services/ai/index.js';
 import { publishResults } from '../utils/pubsub.js';
@@ -22,12 +21,7 @@ export async function analyzeText(req, res, next) {
     // Generate trace ID for tracking
     const traceId = randomUUID();
     
-    logger.info({
-      requestId: req.id,
-      traceId,
-      prompts: texts.length,
-      service: service || 'gemini'
-    }, 'Processing BOE analysis request');
+    console.log(`Processing BOE analysis request - Request ID: ${req.id}, Trace ID: ${traceId}, Prompts: ${texts.length}, Service: ${service || 'gemini'}`);
     
     // Fetch and parse BOE content
     const { boeContent, prompts } = await parseBOE({
@@ -71,11 +65,7 @@ export async function analyzeText(req, res, next) {
     //       for better decoupling and potentially more robust error/retry handling.
     // Publish results to PubSub asynchronously
     publishResults(response).catch(error => {
-      logger.error({
-        requestId: req.id,
-        traceId,
-        error
-      }, 'Failed to publish results to PubSub');
+      console.error(`Failed to publish results to PubSub - Request ID: ${req.id}, Trace ID: ${traceId}, Error:`, error);
     });
     
     // Send response

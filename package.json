@@ -18,13 +18,11 @@
     "fast-xml-parser": "^4.3.2",
     "gpt-tokenizer": "^2.1.2",
     "jsdom": "^24.0.0",
-    "openai": "^4.20.1",
-    "pino": "^8.16.2"
+    "openai": "^4.20.1"
   },
   "devDependencies": {
     "eslint": "^8.54.0",
     "nodemon": "^3.0.1",
-    "pino-pretty": "^10.2.3",
     "vitest": "^1.0.1"
   }
 }

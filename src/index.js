@@ -3,7 +3,6 @@
  */
 import express from 'express';
 import config, { loadSecrets, validateConfig } from './config/config.js';
-import logger from './utils/logger.js';
 import { registerMiddleware } from './middleware/index.js';
 import createRoutes from './routes/index.js';
 
@@ -47,7 +46,7 @@ function startServer(app) {
   const port = config.server.port;
   
   return app.listen(port, () => {
-    logger.info({ port, env: config.env.NODE_ENV }, 'BOE Parser API started');
+    console.log(`BOE Parser API started on port ${port}, env: ${config.env.NODE_ENV}`);
   });
 }
 
@@ -64,7 +63,7 @@ async function init() {
     // Validate configuration
     const missingKeys = validateConfig();
     if (missingKeys.length > 0) {
-      logger.error({ missingKeys }, 'Missing required configuration');
+      console.error('Missing required configuration:', missingKeys);
       process.exit(1);
     }
     
@@ -72,7 +71,7 @@ async function init() {
     const app = createApp();
     startServer(app);
   } catch (error) {
-    logger.error({ error }, 'Failed to initialize application');
+    console.error('Failed to initialize application:', error);
     process.exit(1);
   }
 }
@@ -82,11 +81,11 @@ init();
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (error) => {
-  logger.error({ error }, 'Unhandled promise rejection');
+  console.error('Unhandled promise rejection:', error);
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  logger.error({ error }, 'Uncaught exception');
+  console.error('Uncaught exception:', error);
   process.exit(1);
 });

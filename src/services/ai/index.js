@@ -3,8 +3,6 @@
  */
 import { analyzeWithGemini } from './gemini.js';
 import { analyzeWithOpenAI } from './openai.js';
-import logger from '../../utils/logger.js';
-import { createChildLogger } from '../../utils/logger.js';
 import config from '../../config/config.js';
 
 /**
@@ -16,17 +14,10 @@ import config from '../../config/config.js';
  * @returns {Promise<Object>} - Analysis results
  */
 export async function analyzeBOEItems(boeItems, prompt, requestId, options = {}) {
-  // Create request-specific logger
-  const requestLogger = createChildLogger({ requestId });
-  
   // Select AI service based on options or config
   const service = options.service || 'gemini';
   
-  requestLogger.info({
-    service,
-    itemCount: boeItems?.length || 0,
-    promptLength: prompt?.length || 0
-  }, 'Starting BOE analysis');
+  console.log(`Starting BOE analysis - Request ID: ${requestId}, Service: ${service}, Item Count: ${boeItems?.length || 0}, Prompt Length: ${prompt?.length || 0}`);
   
   try {
     let result;
@@ -41,19 +32,11 @@ export async function analyzeBOEItems(boeItems, prompt, requestId, options = {})
         break;
     }
     
-    requestLogger.info({
-      service,
-      matchesCount: result.matches?.length || 0,
-      processingTime: result.metadata?.processing_time_ms || 0
-    }, 'BOE analysis completed successfully');
+    console.log(`BOE analysis completed successfully - Request ID: ${requestId}, Service: ${service}, Matches Count: ${result.matches?.length || 0}, Processing Time: ${result.metadata?.processing_time_ms || 0}ms`);
     
     return result;
   } catch (error) {
-    requestLogger.error({
-      error,
-      service,
-      promptLength: prompt?.length || 0
-    }, 'BOE analysis failed');
+    console.error(`BOE analysis failed - Request ID: ${requestId}, Service: ${service}, Prompt Length: ${prompt?.length || 0}, Error:`, error);
     
     // Return error response
     return {
