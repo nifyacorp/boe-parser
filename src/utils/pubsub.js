@@ -6,21 +6,82 @@ import { randomUUID } from 'crypto';
 import config from '../config/config.js';
 import { createServiceError } from './errors/AppError.js';
 
-// Create PubSub client
-const pubsub = new PubSub({
-  projectId: config.services.pubsub.projectId,
-});
+let pubsubClient;
+let mainTopicClient;
+let errorTopicClient;
 
-// PubSub topic names
-const MAIN_TOPIC = config.services.pubsub.topicName;
-const DLQ_TOPIC = `${MAIN_TOPIC}-dlq`;
+/**
+ * Get Pub/Sub client instance
+ */
+function getClient() {
+  if (!pubsubClient) {
+    // Use projectId from the dedicated gcp section in config
+    if (!config.gcp.projectId) {
+        console.warn('GCP Project ID not configured (config.gcp.projectId), PubSub might not work correctly.');
+        // Allow initialization without project ID, relying on library/environment inference
+    }
+    console.log(`Initializing Pub/Sub client for project: ${config.gcp.projectId || '(inferred)'}`);
+    pubsubClient = new PubSub({
+      projectId: config.gcp.projectId || undefined,
+    });
+  }
+  return pubsubClient;
+}
 
-// Log PubSub configuration on module import
-console.log({
-  mainTopic: MAIN_TOPIC,
-  dlqTopic: DLQ_TOPIC,
-  projectId: config.services.pubsub.projectId || 'local',
-}, 'PubSub configuration initialized');
+/**
+ * Get Pub/Sub topic client for the main topic
+ */
+function getMainTopic() {
+  const topicName = config.services.pubsub.topicId;
+  if (!topicName) {
+      throw new Error('Main Pub/Sub topic ID (config.services.pubsub.topicId) is not configured.');
+  }
+  if (!mainTopicClient) {
+    mainTopicClient = getClient().topic(topicName);
+  }
+  return mainTopicClient;
+}
+
+/**
+ * Get Pub/Sub topic client for the error/DLQ topic
+ */
+function getErrorTopic() {
+  const topicName = config.services.pubsub.errorTopicId;
+  if (!topicName) {
+    // Not having an error topic might be acceptable
+    return null;
+  }
+  if (!errorTopicClient) {
+    errorTopicClient = getClient().topic(topicName);
+  }
+  return errorTopicClient;
+}
+
+/**
+ * Publish a message to a Pub/Sub topic client
+ * @param {Object} topicClient - Initialized Pub/Sub Topic client
+ * @param {Object} data - Data payload (will be JSON stringified)
+ * @param {Object} attributes - Optional message attributes
+ * @returns {Promise<string>} - Message ID
+ */
+async function publishMessageInternal(topicClient, data, attributes = {}) {
+  const dataBuffer = Buffer.from(JSON.stringify(data));
+  const topicName = topicClient.name; // Get name for logging
+
+  try {
+    // console.log(`Publishing message to topic: ${topicName}`, { attributes, dataSize: dataBuffer.length });
+    const messageId = await topicClient.publishMessage({ data: dataBuffer, attributes });
+    console.log(`Message ${messageId} published successfully to topic ${topicName}.`);
+    return messageId;
+  } catch (error) {
+    console.error(`Failed to publish message to topic ${topicName}:`, { error, attributes });
+    throw createServiceError(`Failed to publish message to Pub/Sub topic ${topicName}`, {
+      cause: error,
+      topic: topicName,
+      attributes,
+    });
+  }
+}
 
 /**
  * Transform raw matches into standardized format
@@ -82,134 +143,59 @@ function extractMatches(results) {
 }
 
 /**
- * Publish analysis results to PubSub
- * @param {Object} payload - Analysis payload
- * @returns {Promise<string>} - Message ID
+ * Publish BOE analysis results to the main topic
+ * @param {Object} results - Analysis results object
+ * @returns {Promise<string|null>} - Message ID or null if topic not configured
  */
-export async function publishResults(payload) {
+export async function publishResults(results) {
+  let topic;
   try {
-    // Ensure trace ID for tracking
-    const traceId = payload.trace_id || randomUUID();
-    
-    // Extract necessary data
-    const results = payload.results || {};
-    const request = payload.request || payload.context || {};
-    const prompts = request.texts || payload.texts || ['General information'];
-    const queryDate = results.query_date || new Date().toISOString().split('T')[0];
-    
-    // Extract matches
-    const matches = extractMatches(results);
-    
-    // Transform matches to standardized format
-    const transformedMatches = transformMatches(matches, prompts, queryDate);
-    
-    // Create standardized message
-    const message = {
-      version: '1.0',
-      trace_id: traceId,
-      processor_type: 'boe',
-      timestamp: new Date().toISOString(),
-      
-      request: {
-        subscription_id: request.subscription_id || 'unknown',
-        user_id: request.user_id || 'unknown',
-        processing_id: randomUUID(),
-        prompts: prompts,
-      },
-      
-      results: {
-        query_date: queryDate,
-        matches: transformedMatches,
-      },
-      
-      metadata: {
-        processing_time_ms: payload.metadata?.processing_time_ms || 0,
-        total_items_processed: payload.metadata?.total_items_processed || 0,
-        total_matches: matches.length,
-        model_used: payload.metadata?.model_used || 'gemini-1.5-pro',
-        status: payload.error ? 'error' : (payload.metadata?.status || 'success'),
-        error: payload.error || payload.metadata?.error || null,
-      },
-    };
-    
-    // Log message structure (debug level)
-    console.log({
-      trace_id: traceId,
-      subscription_id: message.request.subscription_id,
-      user_id: message.request.user_id,
-      matches_count: transformedMatches.length,
-    }, 'Publishing PubSub message');
-    
-    // Publish to main topic
-    const dataBuffer = Buffer.from(JSON.stringify(message));
-    const messageId = await pubsub.topic(MAIN_TOPIC).publish(dataBuffer);
-    
-    console.log({
-      messageId,
-      topicName: MAIN_TOPIC,
-      traceId,
-    }, 'Published BOE analysis results to PubSub');
+      topic = getMainTopic();
+  } catch (configError) {
+      console.warn(configError.message, 'Skipping publishing results.');
+      return null;
+  }
 
-    return messageId;
+  // Add trace ID to attributes if available
+  const attributes = {};
+  if (results.trace_id) attributes.traceId = results.trace_id;
+  if (results.request?.subscription_id) attributes.subscriptionId = results.request.subscription_id;
+  if (results.request?.user_id) attributes.userId = results.request.user_id;
+
+  console.log(`Publishing analysis results to topic: ${topic.name}`, { traceId: results.trace_id });
+
+  try {
+    return await publishMessageInternal(topic, results, attributes);
   } catch (error) {
-    console.error({
-      error,
-      topicName: MAIN_TOPIC,
-    }, 'Failed to publish results to PubSub');
-
-    // Attempt to publish to DLQ
-    await publishToDLQ(payload, error);
-    
+    // Error is already logged in publishMessageInternal
+    console.error(`Failed to publish analysis results - Trace ID: ${results.trace_id}`, { error });
+    // Optionally, try sending to DLQ/Error topic here? For now, just rethrow.
     throw error;
   }
 }
 
 /**
- * Publish error to PubSub for monitoring
- * @param {Error} error - Error object
- * @param {Object} req - Express request object
- * @returns {Promise<string>} - Message ID
+ * Publish error details to the configured error topic
+ * @param {Object} errorContext - Contextual information about the error
+ * @returns {Promise<string|null>} - Message ID or null if error topic not configured or publishing fails
  */
-export async function publishError(error, req) {
-  try {
-    const errorMessage = {
-      version: '1.0',
-      trace_id: req.id || randomUUID(),
-      timestamp: new Date().toISOString(),
-      error: {
-        message: error.message,
-        code: error.code || 'INTERNAL_ERROR',
-        statusCode: error.statusCode || 500,
-        stack: error.stack,
-        isOperational: error.isOperational || false,
-      },
-      request: {
-        path: req.path,
-        method: req.method,
-        query: req.query,
-        headers: {
-          'user-agent': req.headers['user-agent'],
-          'content-type': req.headers['content-type'],
-        },
-      },
-    };
-    
-    const dataBuffer = Buffer.from(JSON.stringify(errorMessage));
-    const messageId = await pubsub.topic(DLQ_TOPIC).publish(dataBuffer);
-    
-    console.log({
-      messageId,
-      topicName: DLQ_TOPIC,
-      traceId: errorMessage.trace_id,
-    }, 'Published error to PubSub');
+export async function publishError(errorContext) {
+  const topic = getErrorTopic();
+  if (!topic) {
+    // console.log('Error Pub/Sub topic not configured. Skipping error publishing.');
+    return null;
+  }
 
-    return messageId;
-  } catch (pubsubError) {
-    console.error({
-      error: pubsubError,
-      originalError: error.message,
-    }, 'Failed to publish error to PubSub');
-    
+  const attributes = { service: 'boe-parser' };
+  if (errorContext.request?.id) attributes.requestId = errorContext.request.id;
+
+  console.log(`Publishing error details to topic: ${topic.name}`, { requestId: errorContext.request?.id });
+
+  try {
+    return await publishMessageInternal(topic, errorContext, attributes);
+  } catch (error) {
+    // Avoid infinite loop if publishing the error fails
+    console.error('CRITICAL: Failed to publish error details to Pub/Sub', { originalErrorContext: errorContext, publishError: error });
     return null;
   }
 }
@@ -232,11 +218,11 @@ async function publishToDLQ(originalPayload, error) {
     };
     
     const dataBuffer = Buffer.from(JSON.stringify(dlqMessage));
-    const messageId = await pubsub.topic(DLQ_TOPIC).publish(dataBuffer);
+    const messageId = await pubsubClient.topic(config.services.pubsub.errorTopicId).publish(dataBuffer);
     
     console.log({
       messageId,
-      topicName: DLQ_TOPIC,
+      topicName: config.services.pubsub.errorTopicId,
     }, 'Published failed message to DLQ');
 
     return messageId;

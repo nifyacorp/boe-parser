@@ -12,6 +12,10 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = NODE_ENV === 'production';
 const IS_DEVELOPMENT = NODE_ENV === 'development';
 
+// Read PubSub names from environment variables provided in the image
+const pubsubTopicName = process.env.PUBSUB_TOPIC_NAME || 'boe-notifications';
+const pubsubDlqTopicName = process.env.PUBSUB_DLQ_TOPIC_NAME || `${pubsubTopicName}-dlq`;
+
 // Configuration object
 const config = {
   env: {
@@ -22,87 +26,119 @@ const config = {
   server: {
     port: process.env.PORT || 3000,
   },
+  gcp: { // Added GCP section for clarity
+    projectId: process.env.GOOGLE_CLOUD_PROJECT || '',
+  },
   services: {
     gemini: {
-      apiKey: process.env.GEMINI_API_KEY || '',
+      apiKey: process.env.GEMINI_API_KEY || '', // Will be loaded from Secret Manager in prod
       model: process.env.GEMINI_MODEL || 'gemini-1.5-pro',
     },
     openai: {
-      apiKey: process.env.OPENAI_API_KEY || '',
+      apiKey: process.env.OPENAI_API_KEY || '', // Will be loaded from Secret Manager in prod
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       organization: process.env.OPENAI_ORGANIZATION || '',
     },
     pubsub: {
-      topicName: process.env.PUBSUB_TOPIC || 'boe-notifications',
-      projectId: process.env.GOOGLE_CLOUD_PROJECT || '',
+      topicId: pubsubTopicName, // Use the loaded topic name
+      errorTopicId: pubsubDlqTopicName, // Use the loaded DLQ topic name
+      // projectId is now under gcp section
     },
   },
   auth: {
-    apiKey: process.env.API_KEY || '',
+    apiKey: process.env.API_KEY || '', // Will be loaded from Secret Manager in prod
   },
+  scraper: { // Added scraper config section
+      timeout: parseInt(process.env.SCRAPER_TIMEOUT_MS || '15000', 10),
+      userAgent: process.env.SCRAPER_USER_AGENT || 'BOE Parser Bot/1.0'
+  }
 };
 
 /**
  * Load secrets from Google Cloud Secret Manager
+ * Only runs in production.
  * @returns {Promise<void>} - Resolves when secrets are loaded
  */
 export async function loadSecrets() {
   if (!IS_PRODUCTION) {
-    console.log('Not in production, skipping secret manager');
+    console.log('Not in production, skipping secret manager for API keys.');
     return;
   }
 
+  console.log('Production environment detected. Attempting to load secrets from Secret Manager...');
+
   try {
     const client = new SecretManagerServiceClient();
-    const projectId = config.services.pubsub.projectId;
+    const projectId = config.gcp.projectId; // Use projectId from gcp section
 
     if (!projectId) {
+      // This shouldn't happen in Cloud Run usually, but good practice to check
+      console.error('GOOGLE_CLOUD_PROJECT environment variable is not set. Cannot load secrets.');
+      // Decide if this is a fatal error for your app
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is not set');
     }
 
-    // Define secrets to load
+    console.log(`Loading secrets from project: ${projectId}`);
+
+    // Define secrets to load (using env var names as secret names by convention)
     const secretsToLoad = [
-      { name: 'GEMINI_API_KEY', configPath: 'services.gemini.apiKey' },
-      { name: 'OPENAI_API_KEY', configPath: 'services.openai.apiKey' },
-      { name: 'API_KEY', configPath: 'auth.apiKey' },
+      { secretName: 'GEMINI_API_KEY', configPath: 'services.gemini.apiKey' },
+      { secretName: 'OPENAI_API_KEY', configPath: 'services.openai.apiKey' },
+      { secretName: 'API_KEY', configPath: 'auth.apiKey' },
+      // Add other secrets here if needed, e.g.:
+      // { secretName: 'DATABASE_PASSWORD', configPath: 'database.password' },
     ];
 
-    // Load each secret
     for (const secret of secretsToLoad) {
-      const [version] = await client.accessSecretVersion({
-        name: `projects/${projectId}/secrets/${secret.name}/versions/latest`,
-      });
-
-      if (version.payload?.data) {
-        // Update config with secret value
-        const value = version.payload.data.toString();
-        const paths = secret.configPath.split('.');
-        let current = config;
-        
-        // Navigate to the right location in the config object
-        for (let i = 0; i < paths.length - 1; i++) {
-          current = current[paths[i]];
-        }
-        
-        // Update the value
-        current[paths[paths.length - 1]] = value;
+      const secretResourceName = `projects/${projectId}/secrets/${secret.secretName}/versions/latest`;
+      console.log(`Accessing secret: ${secret.secretName} (${secretResourceName})`);
+      try {
+          const [version] = await client.accessSecretVersion({ name: secretResourceName });
+          if (version.payload?.data) {
+            const value = version.payload.data.toString('utf8');
+            // Update config using dot notation path
+            const keys = secret.configPath.split('.');
+            let current = config;
+            for (let i = 0; i < keys.length - 1; i++) {
+              current = current[keys[i]] = current[keys[i]] || {}; // Create nested objects if they don't exist
+            }
+            current[keys[keys.length - 1]] = value;
+            console.log(`Successfully loaded secret: ${secret.secretName}`);
+          } else {
+            console.warn(`Secret payload empty for: ${secret.secretName}`);
+          }
+      } catch (secretError) {
+          // Log specific secret loading errors but don't necessarily stop the app
+          // The validateConfig function later will catch if required keys are still missing.
+          console.warn(`Could not load secret: ${secret.secretName}. Error: ${secretError.message}. Code: ${secretError.code}`);
+          if (secretError.code === 5) { // 5 = NOT_FOUND
+              console.warn(` -> Secret or version not found. Ensure secret '${secret.secretName}' exists and the service account has access.`);
+          } else if (secretError.code === 7) { // 7 = PERMISSION_DENIED
+              console.warn(` -> Permission denied accessing secret '${secret.secretName}'. Check IAM permissions for Secret Manager Secret Accessor role.`);
+          }
       }
     }
+    console.log('Finished loading secrets.');
+
   } catch (error) {
-    console.error('Error loading secrets:', error.message);
+    // Catch errors initializing the client or other unexpected issues
+    console.error(`Failed to load secrets from Secret Manager: ${error.message}`, error);
+    // Depending on the app's needs, you might want to rethrow or exit
     throw error;
   }
 }
 
 /**
- * Validate required configuration
+ * Validate required configuration after potential secret loading
  * @returns {Array<string>} - List of missing required configuration keys
  */
 export function validateConfig() {
   const requiredKeys = [
+    'gcp.projectId', // Project ID is generally needed
     'services.gemini.apiKey',
     'services.openai.apiKey',
     'auth.apiKey',
+    'services.pubsub.topicId' // PubSub topic is essential
   ];
 
   const missingKeys = [];
@@ -112,18 +148,22 @@ export function validateConfig() {
     let current = config;
     let isMissing = false;
 
-    // Check if the key exists and has a value
     for (const path of paths) {
-      if (!current || !current[path]) {
+      if (current === null || typeof current === 'undefined' || !Object.prototype.hasOwnProperty.call(current, path)) {
         isMissing = true;
         break;
       }
       current = current[path];
     }
 
-    if (isMissing || current === '') {
+    // Check if the final value is null, undefined, or an empty string
+    if (isMissing || current === null || typeof current === 'undefined' || current === '') {
       missingKeys.push(key);
     }
+  }
+
+  if (missingKeys.length > 0) {
+      console.warn('Configuration validation failed. The following required keys are missing or empty:', missingKeys);
   }
 
   return missingKeys;
