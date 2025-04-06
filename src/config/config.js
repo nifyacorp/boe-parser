@@ -70,7 +70,7 @@ const config = {
     },
   },
   auth: {
-    apiKey: '',
+    apiKey: process.env.API_KEY || '',
   },
   scraper: {
       timeout: parseInt(process.env.SCRAPER_TIMEOUT_MS || '15000', 10),
@@ -96,25 +96,27 @@ export async function loadSecrets() {
   // Define the mapping between config paths and actual Secret Manager names
   const secretMap = {
       'services.gemini.apiKey': 'GEMINI_API_KEY',
-      'services.openai.apiKey': 'OPENAI_API_KEY',
-      'auth.apiKey': 'BOE_API_KEY' // Use the correct secret name here
+      'services.openai.apiKey': 'OPENAI_API_KEY'
+      // Removed 'auth.apiKey': 'BOE_API_KEY' mapping
       // Add other mappings if needed
   };
 
   // Check if keys loaded initially (from env/file) are still missing
   if (!config.services.gemini.apiKey) secretsToFetch.push({ configPath: 'services.gemini.apiKey' });
   if (!config.services.openai.apiKey) secretsToFetch.push({ configPath: 'services.openai.apiKey' });
-  if (!config.auth.apiKey) secretsToFetch.push({ configPath: 'auth.apiKey' });
+  // No longer check config.auth.apiKey here, as it won't be fetched via API
 
   if (secretsToFetch.length === 0) {
-    console.log('Required API keys seem to be loaded already (from env vars or mounted files). Skipping Secret Manager API calls.');
+    // Adjusted log message
+    console.log('Required AI API keys seem to be loaded already (from env vars). Skipping Secret Manager API calls.');
     return;
   }
 
   // Get the actual secret names for the ones we need to fetch
   const secretsToFetchWithNames = secretsToFetch.map(s => ({ ...s, secretName: secretMap[s.configPath] }));
 
-  console.log('Attempting to load missing secrets from Secret Manager API:', secretsToFetchWithNames.map(s => s.secretName));
+  // Adjusted log message
+  console.log('Attempting to load missing AI secrets from Secret Manager API:', secretsToFetchWithNames.map(s => s.secretName));
 
   try {
     const client = new SecretManagerServiceClient();
@@ -151,57 +153,4 @@ export async function loadSecrets() {
           }
       } catch (secretError) {
           console.warn(`Could not load secret via API: ${secret.secretName}. Error: ${secretError.message}. Code: ${secretError.code}`);
-          if (secretError.code === 5) { console.warn(` -> Secret or version not found via API.`); }
-          else if (secretError.code === 7) { console.warn(` -> Permission denied accessing secret via API.`); }
-      }
-    }
-    console.log('Finished loading secrets via API.');
-
-  } catch (error) {
-    console.error(`Failed to load secrets via Secret Manager API: ${error.message}`, error);
-    throw error;
-  }
-}
-
-/**
- * Validate required configuration after potential secret loading
- * @returns {Array<string>} - List of missing required configuration keys
- */
-export function validateConfig() {
-  // Re-validate after attempting all loading methods
-  const requiredKeys = [
-    'gcp.projectId',
-    'services.gemini.apiKey',
-    'services.openai.apiKey',
-    'auth.apiKey',
-    'services.pubsub.topicId'
-  ];
-
-  const missingKeys = [];
-
-  for (const key of requiredKeys) {
-    const paths = key.split('.');
-    let current = config;
-    let isMissing = false;
-
-    for (const path of paths) {
-      if (current === null || typeof current === 'undefined' || !Object.prototype.hasOwnProperty.call(current, path)) {
-        isMissing = true;
-        break;
-      }
-      current = current[path];
-    }
-
-    if (isMissing || current === null || typeof current === 'undefined' || current === '') {
-      missingKeys.push(key);
-    }
-  }
-
-  if (missingKeys.length > 0) {
-      console.warn('Configuration validation failed. The following required keys are missing or empty AFTER checking env, mounted files, and Secret Manager API:', missingKeys);
-  }
-
-  return missingKeys;
-}
-
-export default config;
+          if (secretError.code === 5) { console.warn(` -> Secret or version not found via API.`
