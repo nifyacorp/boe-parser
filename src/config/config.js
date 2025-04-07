@@ -153,4 +153,57 @@ export async function loadSecrets() {
           }
       } catch (secretError) {
           console.warn(`Could not load secret via API: ${secret.secretName}. Error: ${secretError.message}. Code: ${secretError.code}`);
-          if (secretError.code === 5) { console.warn(` -> Secret or version not found via API.`
+          if (secretError.code === 5) { console.warn(` -> Secret or version not found via API.`); }
+          else if (secretError.code === 7) { console.warn(` -> Permission denied accessing secret via API.`); }
+      }
+    }
+    console.log('Finished loading secrets via API.');
+
+  } catch (error) {
+    console.error(`Failed to load secrets via Secret Manager API: ${error.message}`, error);
+    throw error;
+  }
+}
+
+/**
+ * Validate required configuration after potential secret loading
+ * @returns {Array<string>} - List of missing required configuration keys
+ */
+export function validateConfig() {
+  // Re-validate after attempting all loading methods
+  const requiredKeys = [
+    'gcp.projectId',
+    'services.gemini.apiKey',
+    'services.openai.apiKey',
+    'auth.apiKey', // Still required, but now MUST come from process.env.API_KEY
+    'services.pubsub.topicId'
+  ];
+
+  const missingKeys = [];
+
+  for (const key of requiredKeys) {
+    const paths = key.split('.');
+    let current = config;
+    let isMissing = false;
+
+    for (const path of paths) {
+      if (current === null || typeof current === 'undefined' || !Object.prototype.hasOwnProperty.call(current, path)) {
+        isMissing = true;
+        break;
+      }
+      current = current[path];
+    }
+
+    if (isMissing || current === null || typeof current === 'undefined' || current === '') {
+      missingKeys.push(key);
+    }
+  }
+
+  if (missingKeys.length > 0) {
+      console.warn('Configuration validation failed. The following required keys are missing or empty (checked env vars and potentially Secret Manager API for AI keys):', missingKeys);
+  }
+
+  return missingKeys;
+}
+
+export default config;
