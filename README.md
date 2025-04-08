@@ -13,6 +13,81 @@ A Node.js microservice that analyzes content from the Boletín Oficial del Estad
 - ☁️ Cloud-native design for Google Cloud Run
 - 📨 Publishes results to Google Cloud Pub/Sub
 
+## Process Flow
+
+The BOE-parser service uses an AI-driven approach to process Spanish Official Bulletin (BOE) content. Here's a detailed breakdown of the process:
+
+```
+                                BOE Parser Process Flow
+┌──────────────────┐     ┌───────────────────┐     ┌────────────────────┐     ┌──────────────────┐
+│                  │     │                   │     │                    │     │                  │
+│  1. HTTP Request │     │ 2. BOE Retrieval  │     │  3. AI Analysis    │     │ 4. PubSub        │
+│  ───────────────┼────>│ ────────────────  │────>│ ────────────────   │────>│ ────────────     │
+│                  │     │                   │     │                    │     │                  │
+│ - Subscription   │     │ - Fetch BOE XML   │     │ - Create prompts   │     │ - Format results │
+│ - Search prompts │     │ - Parse content   │     │ - Process with AI  │     │ - Add metadata   │
+│ - User metadata  │     │ - Structure data  │     │ - Extract matches  │     │ - Publish message│
+│                  │     │                   │     │ - Score relevance  │     │                  │
+└──────────────────┘     └───────────────────┘     └────────────────────┘     └──────────────────┘
+                                                                                        │
+                                                                                        │
+                                                                                        ▼
+┌────────────────────────┐     ┌────────────────────────┐     ┌────────────────────────┐
+│                        │     │                        │     │                        │
+│  7. User Notification  │     │  6. DB Storage        │     │  5. Notification Worker │
+│  ────────────────     │<────│  ────────────────     │<────│  ────────────────      │
+│                        │     │                        │     │                        │
+│ - Email/push           │     │ - Create notification  │     │ - Process PubSub msg   │
+│ - In-app alert         │     │   records              │     │ - Extract matches      │
+│ - Result display       │     │ - Associate with user  │     │ - Parse content        │
+│                        │     │   and subscription     │     │                        │
+└────────────────────────┘     └────────────────────────┘     └────────────────────────┘
+```
+
+### Process Steps:
+
+1. **Request Processing:**
+   - The service receives a request with search prompts (text queries)
+   - The request includes user identification and subscription data
+   - The controller validates the request format and authorization
+
+2. **BOE Content Retrieval:**
+   - The parser service fetches the BOE content for a specific date (or today's by default)
+   - It uses a scraper module to fetch BOE XML data from oficial sources
+   - The XML is parsed into a structured format with sections, departments, and items
+   - This creates a dataset of BOE bulletins/announcements for analysis
+
+3. **AI Processing:**
+   - The service routes the BOE items and prompts to the AI service
+   - By default, it uses Google's Gemini AI (or OpenAI as an alternative)
+   - The AI service prepares specialized prompts:
+     - A **system prompt** that explains the task
+     - A **content prompt** that contains the BOE items and user query
+   - The AI model analyzes the data and returns JSON with:
+     - Relevance scores for each match (0-100 scale)
+     - Generated summaries of matched content
+     - Notification-friendly titles
+     - Links and metadata for each match
+
+4. **PubSub Publication:**
+   - The formatted results are published to Google PubSub
+   - This message includes all the matches found, relevance scores, and metadata
+   - The structured JSON format allows for easy downstream processing
+
+5. **Notification Worker:**
+   - A separate microservice consumes the PubSub message
+   - It processes the matches and prepares notifications
+
+6. **Database Storage:**
+   - Notifications are stored in the database
+   - They're associated with the correct user and subscription
+
+7. **User Notification:**
+   - Users are notified about relevant BOE entries based on their subscriptions
+   - Notifications can be viewed in the application or sent as emails/alerts
+
+The key innovation in this process is that the AI is prompted to return structured data (JSON) rather than natural language. This allows the service to directly use the AI's output in the application pipeline without complex post-processing.
+
 ## Architecture
 
 The service follows a modular architecture with clear separation of concerns:
