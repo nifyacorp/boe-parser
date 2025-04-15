@@ -181,7 +181,7 @@ export async function fetchBOEContent(date, requestId) {
 
 // Constants
 const BOE_BASE_URL = 'https://www.boe.es';
-const SUMMARY_ENDPOINT = '/diario_boe/xml.php?id=BOE-S-';
+const SUMMARY_ENDPOINT = '/datosabiertos/api/boe/sumario/';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // ms
 
