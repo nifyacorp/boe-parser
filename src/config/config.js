@@ -65,7 +65,8 @@ const config = {
     },
   },
   auth: {
-    apiKey: process.env.API_KEY || '',
+    apiKey: '', // No environment variable fallback
+    apiKeySecretName: 'PARSER_API_KEY',
   },
   scraper: {
       timeout: parseInt(process.env.SCRAPER_TIMEOUT_MS || '15000', 10),
@@ -76,38 +77,34 @@ const config = {
 /**
  * Load secrets from Google Cloud Secret Manager API
  * This acts as a fallback or alternative if env vars/mounted files aren't used/available.
- * Only runs in production.
  * @returns {Promise<void>} - Resolves when secrets are loaded
  */
 export async function loadSecrets() {
-  if (!IS_PRODUCTION) {
-    console.log('Not in production, skipping Secret Manager API calls.');
-    return;
-  }
-
-  console.log('Production environment. Checking if secrets need fetching via API...');
+  console.log('Checking if secrets need fetching via Secret Manager...');
 
   const secretsToFetch = [];
   // Define the mapping between config paths and actual Secret Manager names
   const secretMap = {
       'services.gemini.apiKey': 'GEMINI_API_KEY',
+      'auth.apiKey': 'PARSER_API_KEY',
       // Add other mappings if needed
   };
 
-  // Check if keys loaded initially (from env/file) are still missing
+  // Always load PARSER_API_KEY from Secret Manager (primary source)
+  secretsToFetch.push({ configPath: 'auth.apiKey' });
+  
+  // Check if other keys are needed
   if (!config.services.gemini.apiKey) secretsToFetch.push({ configPath: 'services.gemini.apiKey' });
 
   if (secretsToFetch.length === 0) {
-    // Adjusted log message
-    console.log('Required AI API keys seem to be loaded already (from env vars). Skipping Secret Manager API calls.');
+    console.log('No secrets need to be loaded.');
     return;
   }
 
   // Get the actual secret names for the ones we need to fetch
   const secretsToFetchWithNames = secretsToFetch.map(s => ({ ...s, secretName: secretMap[s.configPath] }));
 
-  // Adjusted log message
-  console.log('Attempting to load missing AI secrets from Secret Manager API:', secretsToFetchWithNames.map(s => s.secretName));
+  console.log('Attempting to load secrets from Secret Manager:', secretsToFetchWithNames.map(s => s.secretName));
 
   try {
     const client = new SecretManagerServiceClient();
@@ -190,7 +187,10 @@ export function validateConfig() {
   }
 
   if (missingKeys.length > 0) {
-      console.warn('Configuration validation failed. The following required keys are missing or empty (checked env vars and potentially Secret Manager API for AI keys):', missingKeys);
+      console.warn('Configuration validation failed. The following required keys are missing or empty (checked env vars and potentially Secret Manager API for keys):', missingKeys);
+      if (missingKeys.includes('auth.apiKey')) {
+        console.error('The API key is required and should be loaded from Secret Manager with secret name: PARSER_API_KEY');
+      }
   }
 
   return missingKeys;

@@ -9,7 +9,7 @@ let cachedApiKey = null;
 let isFetchingApiKey = false;
 
 /**
- * Fetch API key from Secret Manager or environment variable
+ * Fetch API key from Secret Manager
  * Caches the key after the first successful fetch.
  */
 async function getApiKey() {
@@ -17,41 +17,33 @@ async function getApiKey() {
     return cachedApiKey;
   }
 
-  // Use API_KEY from environment if available
-  if (config.auth.apiKey) {
-    // console.log('Using API key from environment variable/config.');
-    cachedApiKey = config.auth.apiKey;
-    return cachedApiKey;
-  }
-
-  // Avoid concurrent fetches if using Secret Manager
+  // Avoid concurrent fetches
   if (isFetchingApiKey) {
     // Wait for the ongoing fetch to complete
     await new Promise(resolve => setTimeout(resolve, 100)); // Simple wait
     return getApiKey(); // Retry getting the cached key
   }
 
-  // Fetch from Secret Manager if secretName is configured
+  // Only fetch from Secret Manager
   if (config.auth.apiKeySecretName) {
     isFetchingApiKey = true;
     try {
-      // console.log('Fetching API key from Secret Manager...');
+      console.log('Fetching API key from Secret Manager...');
       const { accessSecretVersion } = await import('../utils/secrets.js');
       cachedApiKey = await accessSecretVersion(config.auth.apiKeySecretName);
-      // console.log('API key fetched and cached successfully from Secret Manager.');
+      console.log('API key fetched and cached successfully from Secret Manager.');
       isFetchingApiKey = false;
       return cachedApiKey;
     } catch (error) {
       isFetchingApiKey = false;
       console.error(`Failed to fetch API key from Secret Manager (Secret: ${config.auth.apiKeySecretName})`, { error });
-      // Depending on policy, either throw or return null/undefined
-      // Returning null here means auth will fail later
+      // No fallback to environment variable - return null if Secret Manager fails
       return null;
     }
   }
 
-  // If no key is available from env or secret manager
-  console.error('API key is not configured in environment variables (API_KEY) or Secret Manager (API_KEY_SECRET_NAME)');
+  // If Secret Manager is not configured
+  console.error('API key is not configured in Secret Manager (PARSER_API_KEY)');
   return null;
 }
 
