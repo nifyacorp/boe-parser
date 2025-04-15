@@ -200,8 +200,10 @@ async function fetchBOESummary(date, requestId) {
       const response = await axios.get(url, {
         timeout: config.scraper.timeout || 15000,
         headers: {
-          'User-Agent': config.scraper.userAgent || 'BOE Parser Bot'
-        }
+          'User-Agent': config.scraper.userAgent || 'BOE Parser Bot',
+          'Accept': 'application/xml, text/xml'  // Explicitly request XML
+        },
+        responseType: 'text'  // Force response as text
       });
 
       if (response.status !== 200) {
@@ -210,7 +212,15 @@ async function fetchBOESummary(date, requestId) {
         });
       }
       console.log(`Successfully fetched BOE summary - Request ID: ${requestId}, Status: ${response.status}, Attempt: ${attempt}`);
-      return response.data;
+      
+      // Log data type for debugging
+      const dataType = typeof response.data;
+      const isString = dataType === 'string';
+      const contentType = response.headers['content-type'] || 'unknown';
+      console.log(`BOE response data type - Request ID: ${requestId}, Type: ${dataType}, Is String: ${isString}, Content-Type: ${contentType}`);
+      
+      // Ensure we're returning a string
+      return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
     } catch (error) {
       console.warn(`Attempt ${attempt} failed to fetch BOE summary - Request ID: ${requestId}, Error:`, error.message);
       if (attempt === MAX_RETRIES) {
@@ -232,12 +242,29 @@ async function fetchBOESummary(date, requestId) {
  */
 function parseBOEXML(xmlData, requestId) {
   try {
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-    const jsonObj = parser.parse(xmlData);
+    // Ensure xmlData is a string
+    if (xmlData === null || xmlData === undefined) {
+      throw createServiceError('XML data is null or undefined');
+    }
+    
+    // Convert to string if it's not already a string
+    const xmlString = typeof xmlData === 'string' ? xmlData : JSON.stringify(xmlData);
+    
+    const parser = new XMLParser({ 
+      ignoreAttributes: false, 
+      attributeNamePrefix: "@_",
+      // Remove XML tags and other unnecessary content to reduce tokens
+      preserveOrder: true,
+      trimValues: true 
+    });
+    const jsonObj = parser.parse(xmlString);
 
     if (!jsonObj.sumario || !jsonObj.sumario.diario || !jsonObj.sumario.item) {
-      console.warn(`Incomplete BOE XML structure - Request ID: ${requestId}, Data:`, xmlData.substring(0, 500));
-      throw createServiceError('Incomplete BOE XML structure', { xmlPreview: xmlData.substring(0, 500) });
+      console.warn(`Incomplete BOE XML structure - Request ID: ${requestId}, Data:`, 
+        typeof xmlString === 'string' ? xmlString.substring(0, 500) : 'Non-string data');
+      throw createServiceError('Incomplete BOE XML structure', { 
+        xmlPreview: typeof xmlString === 'string' ? xmlString.substring(0, 500) : 'Non-string data' 
+      });
     }
 
     const items = Array.isArray(jsonObj.sumario.item) ? jsonObj.sumario.item : [jsonObj.sumario.item];
@@ -246,6 +273,7 @@ function parseBOEXML(xmlData, requestId) {
 
     console.log(`Parsed BOE XML - Request ID: ${requestId}, Items: ${items.length}, BOE Date: ${queryDate}`);
 
+    // Simplify items to reduce token usage
     return {
       items: items.map(item => ({
         id: item.urlHito?.replace('/diario_boe/txt.php?id=', '') || item['@_id'],
@@ -253,10 +281,9 @@ function parseBOEXML(xmlData, requestId) {
         department: processTextContent(item.departamento),
         section: processTextContent(item.seccion?.['@_nombre']),
         epigraph: processTextContent(item.epigrafe),
-        origin: processTextContent(item.origen_legislativo),
+        content: processTextContent(item.texto || item.titulo), // Include main content if available
         pdf_url: item.urlPdf ? `${BOE_BASE_URL}${item.urlPdf}` : null,
         html_url: item.urlHito ? `${BOE_BASE_URL}${item.urlHito}` : null,
-        text_content: null, // Placeholder for scraped text
       })),
       boe_info: {
         issue_number: boeInfo['@_nbo'],
