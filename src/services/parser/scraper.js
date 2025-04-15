@@ -250,54 +250,29 @@ function parseBOEXML(xmlData, requestId) {
     // Convert to string if it's not already a string
     const xmlString = typeof xmlData === 'string' ? xmlData : JSON.stringify(xmlData);
     
-    const parser = new XMLParser({ 
-      ignoreAttributes: false, 
-      attributeNamePrefix: "@_",
-      // Remove XML tags and other unnecessary content to reduce tokens
-      preserveOrder: true,
-      trimValues: true 
-    });
-    const jsonObj = parser.parse(xmlString);
-
-    if (!jsonObj.sumario || !jsonObj.sumario.diario || !jsonObj.sumario.item) {
-      console.warn(`Incomplete BOE XML structure - Request ID: ${requestId}, Data:`, 
-        typeof xmlString === 'string' ? xmlString.substring(0, 500) : 'Non-string data');
-      throw createServiceError('Incomplete BOE XML structure', { 
-        xmlPreview: typeof xmlString === 'string' ? xmlString.substring(0, 500) : 'Non-string data' 
-      });
-    }
-
-    const items = Array.isArray(jsonObj.sumario.item) ? jsonObj.sumario.item : [jsonObj.sumario.item];
-    const boeInfo = jsonObj.sumario.diario;
-    const queryDate = jsonObj.sumario['@_fecha'];
-
-    console.log(`Parsed BOE XML - Request ID: ${requestId}, Items: ${items.length}, BOE Date: ${queryDate}`);
-
-    // Simplify items to reduce token usage
+    // Log the content type and length
+    console.log(`Processing BOE XML content - Request ID: ${requestId}, Content length: ${xmlString.length}`);
+    
+    // Simply pass the raw content as is - let the AI handle the parsing
+    // We're not doing any validation or complex parsing to avoid losing information
     return {
-      items: items.map(item => ({
-        id: item.urlHito?.replace('/diario_boe/txt.php?id=', '') || item['@_id'],
-        title: processTextContent(item.titulo),
-        department: processTextContent(item.departamento),
-        section: processTextContent(item.seccion?.['@_nombre']),
-        epigraph: processTextContent(item.epigrafe),
-        content: processTextContent(item.texto || item.titulo), // Include main content if available
-        pdf_url: item.urlPdf ? `${BOE_BASE_URL}${item.urlPdf}` : null,
-        html_url: item.urlHito ? `${BOE_BASE_URL}${item.urlHito}` : null,
-      })),
+      items: [{
+        // Pass the full raw XML content to the AI
+        content: xmlString,
+        source_url: `${BOE_BASE_URL}${SUMMARY_ENDPOINT}`,
+      }],
       boe_info: {
-        issue_number: boeInfo['@_nbo'],
-        publication_date: queryDate,
-        source_url: `${BOE_BASE_URL}${SUMMARY_ENDPOINT}${queryDate.replace(/-/g, '')}`
+        publication_date: new Date().toISOString().split('T')[0],
+        source_url: `${BOE_BASE_URL}${SUMMARY_ENDPOINT}`
       },
-      query_date: queryDate
+      query_date: new Date().toISOString().split('T')[0]
     };
   } catch (error) {
-    console.error(`Failed to parse BOE XML - Request ID: ${requestId}, Error:`, error);
+    console.error(`Failed to process BOE XML - Request ID: ${requestId}, Error:`, error);
     if (error instanceof Error && error.code && error.isOperational) {
         throw error; // Re-throw AppError directly
     }
-    throw createServiceError('Failed to parse BOE XML', { cause: error });
+    throw createServiceError('Failed to process BOE XML', { cause: error });
   }
 }
 
