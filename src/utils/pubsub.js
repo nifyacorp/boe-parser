@@ -69,7 +69,14 @@ async function publishMessageInternal(topicClient, data, attributes = {}) {
   const topicName = topicClient.name; // Get name for logging
 
   try {
-    // console.log(`Publishing message to topic: ${topicName}`, { attributes, dataSize: dataBuffer.length });
+    // Log data size and a preview of the content
+    console.log('Publishing message details:', { 
+      topicName,
+      attributes, 
+      dataSize: dataBuffer.length,
+      contentPreview: JSON.stringify(data).substring(0, 200) + '...'
+    });
+    
     const messageId = await topicClient.publishMessage({ data: dataBuffer, attributes });
     console.log(`Message ${messageId} published successfully to topic ${topicName}.`);
     return messageId;
@@ -163,6 +170,23 @@ export async function publishResults(results) {
   if (results.request?.user_id) attributes.userId = results.request.user_id;
 
   console.log(`Publishing analysis results to topic: ${topic.name}`, { traceId: results.trace_id });
+  
+  // Log the message structure for debugging
+  console.log('PubSub message structure:', {
+    trace_id: results.trace_id,
+    request: {
+      subscription_id: results.request?.subscription_id,
+      user_id: results.request?.user_id,
+      texts: results.request?.texts?.map(t => t.substring(0, 30) + (t.length > 30 ? '...' : ''))
+    },
+    results_summary: {
+      boe_info: results.results?.boe_info,
+      query_date: results.results?.query_date,
+      results_count: results.results?.results?.length || 0,
+      total_matches: results.results?.results?.reduce((sum, r) => sum + (r.matches?.length || 0), 0) || 0
+    },
+    metadata: results.metadata
+  });
 
   try {
     return await publishMessageInternal(topic, results, attributes);

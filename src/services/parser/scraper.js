@@ -217,7 +217,11 @@ async function fetchBOESummary(date, requestId) {
       const dataType = typeof response.data;
       const isString = dataType === 'string';
       const contentType = response.headers['content-type'] || 'unknown';
+      const dataLength = typeof response.data === 'string' ? response.data.length : 0;
+      const estimatedTokens = Math.round(dataLength / 4); // Rough estimate: ~4 chars per token
+      
       console.log(`BOE response data type - Request ID: ${requestId}, Type: ${dataType}, Is String: ${isString}, Content-Type: ${contentType}`);
+      console.log(`BOE response content stats - Request ID: ${requestId}, Chars: ${dataLength}, Est. Tokens: ${estimatedTokens}`);
       
       // Ensure we're returning a string
       return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
@@ -250,8 +254,12 @@ function parseBOEXML(xmlData, requestId) {
     // Convert to string if it's not already a string
     const xmlString = typeof xmlData === 'string' ? xmlData : JSON.stringify(xmlData);
     
+    // Calculate and log token estimates
+    const inputChars = xmlString.length;
+    const inputTokens = Math.round(inputChars / 4); // Rough estimate: ~4 chars per token
+    
     // Log the content type and length
-    console.log(`Processing BOE XML content - Request ID: ${requestId}, Content length: ${xmlString.length}`);
+    console.log(`Processing BOE XML content - Request ID: ${requestId}, Content length: ${inputChars}, Est. Input Tokens: ${inputTokens}`);
     
     // Simply pass the raw content as is - let the AI handle the parsing
     // We're not doing any validation or complex parsing to avoid losing information

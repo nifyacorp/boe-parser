@@ -78,7 +78,15 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
   const model = getGeminiModel();
   const startTime = Date.now();
 
-  // console.log(`Starting Gemini analysis - Request ID: ${requestId}, Items: ${boeItems.length}`);
+  // Calculate prompt token sizes
+  const systemMessage = createSystemPrompt(prompt);
+  const contentMessage = createContentPrompt(boeItems, prompt, boeItems.length);
+  
+  const systemTokens = Math.round(systemMessage.length / 4);
+  const contentTokens = Math.round(contentMessage.length / 4);
+  const totalInputTokens = systemTokens + contentTokens;
+  
+  console.log(`Gemini analysis token estimates - Request ID: ${requestId}, System Tokens: ${systemTokens}, Content Tokens: ${contentTokens}, Total Input Tokens: ${totalInputTokens}`);
 
   const generationConfig = {
     temperature: 0.2,
@@ -93,9 +101,6 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
     { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
   ];
-
-  const systemMessage = createSystemPrompt(prompt);
-  const contentMessage = createContentPrompt(boeItems, prompt, boeItems.length);
 
   const parts = [
     { text: systemMessage },
@@ -112,15 +117,15 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
     const processingTime = Date.now() - startTime;
 
     if (!result.response) {
-      // console.error(`Gemini analysis failed: No response object - Request ID: ${requestId}, Full Result:`, result);
       console.error(`Gemini analysis failed: No response object - Request ID: ${requestId}, Full Result:`, result);
       throw createExternalApiError('Gemini API returned no response object', { code: 'GEMINI_NO_RESPONSE', details: result, service: 'Gemini' });
     }
 
     const response = result.response;
     const responseText = response.text();
+    const responseTokens = Math.round(responseText.length / 4);
 
-    // console.log(`Gemini raw response received - Request ID: ${requestId}, Text Length: ${responseText.length}`);
+    console.log(`Gemini response received - Request ID: ${requestId}, Chars: ${responseText.length}, Est. Output Tokens: ${responseTokens}`);
 
     const parsedResult = parseGeminiResponse(responseText, requestId);
 
@@ -131,16 +136,19 @@ export async function analyzeWithGemini(boeItems, prompt, requestId, options = {
       usage: response.usageMetadata, // Include usage if available
       finish_reason: response.finishReason, // Include finish reason
       safety_ratings: response.safetyRatings, // Include safety ratings
+      token_usage: {
+        input_tokens: totalInputTokens, 
+        output_tokens: responseTokens,
+        total_tokens: totalInputTokens + responseTokens
+      }
     };
 
-    // console.log(`Gemini analysis successful - Request ID: ${requestId}, Matches: ${parsedResult.matches.length}, Time: ${processingTime}ms`);
-    console.log(`Gemini analysis successful - Request ID: ${requestId}, Matches: ${parsedResult.matches.length}, Time: ${processingTime}ms`);
+    console.log(`Gemini analysis successful - Request ID: ${requestId}, Matches: ${parsedResult.matches.length}, Time: ${processingTime}ms, Total Tokens: ${totalInputTokens + responseTokens}`);
 
     return parsedResult;
 
   } catch (error) {
     const processingTime = Date.now() - startTime;
-    // console.error(`Gemini analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
     console.error(`Gemini analysis error - Request ID: ${requestId}, Time: ${processingTime}ms, Error:`, error);
 
     if (error instanceof Error && error.code && error.isOperational) {
