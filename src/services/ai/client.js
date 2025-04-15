@@ -2,12 +2,10 @@
  * AI client initialization and management
  */
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import OpenAI from "openai";
 import config from '../../config/config.js';
 
-// AI client singletons
+// AI client singleton
 let geminiModel = null;
-let openaiClient = null;
 
 /**
  * Initialize and get Gemini client model
@@ -26,29 +24,9 @@ export function getGeminiModel() {
 }
 
 /**
- * Initialize and get OpenAI client
- * @returns {Object} OpenAI client instance
- */
-export function getOpenAIClient() {
-  if (!openaiClient) {
-    if (!config.services.openai.apiKey) {
-      throw new Error('OpenAI API key not configured.');
-    }
-    openaiClient = new OpenAI({
-      apiKey: config.services.openai.apiKey,
-      // Add organization ID if needed
-      // organization: config.services.openai.organizationId
-    });
-    console.log('OpenAI client initialized.');
-  }
-  return openaiClient;
-}
-
-/**
- * Reset clients (useful for testing or config changes)
+ * Reset client (useful for testing or config changes)
  */
 export function resetAIClients() {
   geminiModel = null;
-  openaiClient = null;
-  console.log('AI clients reset.');
+  console.log('AI client reset.');
 }

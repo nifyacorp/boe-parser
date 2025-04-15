@@ -3,7 +3,8 @@
  */
 import { Router } from 'express';
 import createAnalyzeRoutes from './analyze.js';
-import createTestRoutes from './test.js';
+// Remove import for test routes
+// import createTestRoutes from './test.js';
 
 /**
  * Create and register all routes
@@ -22,9 +23,10 @@ export default function createRoutes(middleware) {
     });
   });
   
-  // Register API routes
+  // Register API routes - only keep analyze routes
   router.use('/api', createAnalyzeRoutes(middleware));
-  router.use('/api', createTestRoutes(middleware));
+  // Remove test routes
+  // router.use('/api', createTestRoutes(middleware));
   
   return router;
 }

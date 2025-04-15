@@ -59,11 +59,6 @@ const config = {
       apiKey: process.env.GEMINI_API_KEY || '',
       model: process.env.GEMINI_MODEL || 'gemini-1.5-pro',
     },
-    openai: {
-      apiKey: process.env.OPENAI_API_KEY || '',
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      organization: process.env.OPENAI_ORGANIZATION || '',
-    },
     pubsub: {
       topicId: pubsubTopicName,
       errorTopicId: pubsubDlqTopicName,
@@ -96,15 +91,11 @@ export async function loadSecrets() {
   // Define the mapping between config paths and actual Secret Manager names
   const secretMap = {
       'services.gemini.apiKey': 'GEMINI_API_KEY',
-      'services.openai.apiKey': 'OPENAI_API_KEY'
-      // Removed 'auth.apiKey': 'BOE_API_KEY' mapping
       // Add other mappings if needed
   };
 
   // Check if keys loaded initially (from env/file) are still missing
   if (!config.services.gemini.apiKey) secretsToFetch.push({ configPath: 'services.gemini.apiKey' });
-  if (!config.services.openai.apiKey) secretsToFetch.push({ configPath: 'services.openai.apiKey' });
-  // No longer check config.auth.apiKey here, as it won't be fetched via API
 
   if (secretsToFetch.length === 0) {
     // Adjusted log message
@@ -174,8 +165,7 @@ export function validateConfig() {
   const requiredKeys = [
     'gcp.projectId',
     'services.gemini.apiKey',
-    'services.openai.apiKey',
-    'auth.apiKey', // Still required, but now MUST come from process.env.API_KEY
+    'auth.apiKey',
     'services.pubsub.topicId'
   ];
 

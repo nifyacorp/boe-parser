@@ -65,7 +65,6 @@ async function init() {
     console.log('--- Pre-Validation Config Check ---');
     console.log(`gcp.projectId: ${config.gcp.projectId ? 'OK' : 'MISSING'}`);
     console.log(`services.gemini.apiKey: ${config.services.gemini.apiKey ? 'OK' : 'MISSING'}`);
-    console.log(`services.openai.apiKey: ${config.services.openai.apiKey ? 'OK' : 'MISSING'}`);
     console.log(`auth.apiKey: ${config.auth.apiKey ? 'OK' : 'MISSING'}`);
     console.log(`services.pubsub.topicId: ${config.services.pubsub.topicId ? 'OK' : 'MISSING'}`);
     console.log('----------------------------------');

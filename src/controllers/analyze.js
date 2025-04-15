@@ -21,7 +21,7 @@ export async function analyzeText(req, res, next) {
     // Generate trace ID for tracking
     const traceId = randomUUID();
     
-    console.log(`Processing BOE analysis request - Request ID: ${req.id}, Trace ID: ${traceId}, Prompts: ${texts.length}, Service: ${service || 'gemini'}`);
+    console.log(`Processing BOE analysis request - Request ID: ${req.id}, Trace ID: ${traceId}, Prompts: ${texts.length}, Service: gemini`);
     
     // Fetch and parse BOE content
     const { boeContent, prompts } = await parseBOE({
@@ -30,9 +30,9 @@ export async function analyzeText(req, res, next) {
       requestId: req.id
     });
     
-    // Analyze each prompt
+    // Analyze each prompt - only using Gemini (HANI)
     const analysisPromises = prompts.map(prompt => 
-      analyzeBOEItems(boeContent.items, prompt, req.id, { service })
+      analyzeBOEItems(boeContent.items, prompt, req.id, { service: 'gemini' })
     );
     
     const analysisResults = await Promise.all(analysisPromises);
@@ -61,8 +61,6 @@ export async function analyzeText(req, res, next) {
       }
     };
     
-    // TODO: Consider moving PubSub publishing to a dedicated service or event handler
-    //       for better decoupling and potentially more robust error/retry handling.
     // Publish results to PubSub asynchronously
     publishResults(response).catch(error => {
       console.error(`Failed to publish results to PubSub - Request ID: ${req.id}, Trace ID: ${traceId}, Error:`, error);
@@ -72,25 +70,6 @@ export async function analyzeText(req, res, next) {
     res.json(response);
   } catch (error) {
     // Pass to error handler
-    next(error);
-  }
-}
-
-/**
- * Handle test-analyze request
- * @param {Object} req - Express request
- * @param {Object} res - Express response
- * @param {Function} next - Express next
- */
-export async function testAnalyze(req, res, next) {
-  try {
-    // Reuse main analyze function with diagnostic flag
-    // Validation is implicitly handled because analyzeText is called
-    req.body.diagnostic = true;
-    
-    // Continue to main analyze handler
-    await analyzeText(req, res, next);
-  } catch (error) {
     next(error);
   }
 }
