@@ -6,7 +6,8 @@
     "test": "vitest",
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "lint": "eslint src/**/*.js"
+    "lint": "eslint src/**/*.js",
+    "test-secrets": "node scripts/test-secrets.js"
   },
   "dependencies": {
     "@google-cloud/pubsub": "^4.0.7",

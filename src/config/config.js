@@ -65,7 +65,7 @@ const config = {
     },
   },
   auth: {
-    apiKey: '', // No environment variable fallback
+    apiKey: process.env.PARSER_API_KEY || '', // Try direct env var first
     apiKeySecretName: 'PARSER_API_KEY',
   },
   scraper: {
@@ -82,6 +82,14 @@ const config = {
 export async function loadSecrets() {
   console.log('Checking if secrets need fetching via Secret Manager...');
 
+  // First check if we can read from mounted secrets (Cloud Run volume mounts)
+  const apiKeyFromMounted = readMountedSecret('PARSER_API_KEY');
+  if (apiKeyFromMounted) {
+    config.auth.apiKey = apiKeyFromMounted;
+    console.log('Successfully loaded auth.apiKey from mounted secret');
+  }
+
+  // If we got the API key from mounted secret, remove it from the fetch list
   const secretsToFetch = [];
   // Define the mapping between config paths and actual Secret Manager names
   const secretMap = {
@@ -90,14 +98,17 @@ export async function loadSecrets() {
       // Add other mappings if needed
   };
 
-  // Always load PARSER_API_KEY from Secret Manager (primary source)
-  secretsToFetch.push({ configPath: 'auth.apiKey' });
+  // Check if auth.apiKey still needs to be loaded
+  if (!config.auth.apiKey) {
+    console.log('auth.apiKey not found in environment or mounted secret, will try Secret Manager');
+    secretsToFetch.push({ configPath: 'auth.apiKey' });
+  }
   
   // Check if other keys are needed
   if (!config.services.gemini.apiKey) secretsToFetch.push({ configPath: 'services.gemini.apiKey' });
 
   if (secretsToFetch.length === 0) {
-    console.log('No secrets need to be loaded.');
+    console.log('No secrets need to be loaded from Secret Manager.');
     return;
   }
 
@@ -140,15 +151,17 @@ export async function loadSecrets() {
             console.warn(`Secret payload empty via API for: ${secret.secretName}`);
           }
       } catch (secretError) {
-          console.warn(`Could not load secret via API: ${secret.secretName}. Error: ${secretError.message}. Code: ${secretError.code}`);
-          if (secretError.code === 5) { console.warn(` -> Secret or version not found via API.`); }
-          else if (secretError.code === 7) { console.warn(` -> Permission denied accessing secret via API.`); }
+          console.error(`Could not load secret via API: ${secret.secretName}. Error: ${secretError.message}. Code: ${secretError.code}`);
+          console.error('Full error:', JSON.stringify(secretError));
+          if (secretError.code === 5) { console.error(` -> Secret or version not found via API.`); }
+          else if (secretError.code === 7) { console.error(` -> Permission denied accessing secret via API. Ensure service account has Secret Manager Secret Accessor role.`); }
       }
     }
     console.log('Finished loading secrets via API.');
 
   } catch (error) {
     console.error(`Failed to load secrets via Secret Manager API: ${error.message}`, error);
+    console.error('Stack trace:', error.stack);
     throw error;
   }
 }
