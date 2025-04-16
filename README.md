@@ -15,6 +15,17 @@ The BOE Parser is built with a modular architecture focused on performance, reli
                                            ┌───────────────┐     ┌───────────────┐
                                            │ External APIs │     │  Gemini API   │
                                            └───────────────┘     └───────────────┘
+                                                  │                      │
+                                                  └──────────┬───────────┘
+                                                             ▼
+                                                   ┌───────────────────┐
+                                                   │ PubSub Publishing │
+                                                   └───────────────────┘
+                                                             │
+                                                             ▼
+                                                   ┌───────────────────┐
+                                                   │Notification Worker│
+                                                   └───────────────────┘
 ```
 
 ## Process Flow
@@ -24,7 +35,7 @@ The BOE Parser is built with a modular architecture focused on performance, reli
 3. **Data Processing**: The XML is parsed and prepared for AI analysis
 4. **AI Analysis**: The processed data is sent to Gemini AI along with user queries to identify relevant matches
 5. **Response Generation**: Structured responses are returned with matched BOE entries
-6. **Event Publishing**: Analysis results can be published to PubSub for further processing
+6. **Event Publishing**: Analysis results are published to PubSub for the Notification Worker to process
 
 ## Core Components
 
@@ -52,6 +63,38 @@ The BOE Parser is built with a modular architecture focused on performance, reli
 |--------|-------------|
 | `errors/AppError.js` | Custom error handling framework |
 | `pubsub.js` | Utilities for publishing to Google PubSub |
+| `schemas/pubsubMessages.js` | Shared schema definitions for PubSub message validation |
+
+## PubSub Communication
+
+The BOE Parser uses a standardized message schema for publishing results to the Notification Worker via Google PubSub. This schema is shared between both services to ensure compatibility.
+
+### Shared Schema Structure
+
+Both the BOE Parser and Notification Worker use an identical schema definition in:
+- `src/utils/schemas/pubsubMessages.js`
+
+The schema enforces consistent message structure with validation for required fields, including:
+
+```javascript
+{
+  trace_id: "string",
+  request: {
+    subscription_id: "string", // Required: Empty string if not available
+    user_id: "string",         // Required: Empty string if not available
+    texts: []                  // Array of prompts/search texts
+  },
+  results: { ... },
+  metadata: { ... }
+}
+```
+
+### Schema Documentation
+
+For detailed information about the message schema, please refer to:
+- [PubSub Schema Documentation](docs/PUBSUB_SCHEMA.md)
+
+This documentation explains field requirements, validation process, and troubleshooting common issues.
 
 ## Key Functions
 
