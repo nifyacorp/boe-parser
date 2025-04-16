@@ -37,13 +37,14 @@ export async function analyzeText(req, res, next) {
     
     const analysisResults = await Promise.all(analysisPromises);
     
-    // Prepare response structure
+    // Prepare response structure with default empty string values for subscription_id and user_id
+    // to ensure compatibility with notification worker's schema validation
     const response = {
       trace_id: traceId,
       request: {
         texts: prompts,
-        subscription_id,
-        user_id
+        subscription_id: subscription_id || "",
+        user_id: user_id || ""
       },
       results: {
         boe_info: boeContent.boe_info,

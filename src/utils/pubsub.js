@@ -5,6 +5,7 @@ import { PubSub } from '@google-cloud/pubsub';
 import { randomUUID } from 'crypto';
 import config from '../config/config.js';
 import { createServiceError } from './errors/AppError.js';
+import { validateBoeParserMessage } from './schemas/pubsubMessages.js';
 
 let pubsubClient;
 let mainTopicClient;
@@ -163,11 +164,31 @@ export async function publishResults(results) {
       return null;
   }
 
+  // Validate the message against the schema before publishing
+  try {
+    validateBoeParserMessage(results);
+  } catch (validationError) {
+    console.error(`Message validation failed - Trace ID: ${results.trace_id}`, { 
+      error: validationError.message,
+      trace_id: results.trace_id
+    });
+    // Re-throw with more context
+    throw createServiceError(`Failed to validate message: ${validationError.message}`, {
+      cause: validationError,
+      messageId: results.trace_id,
+    });
+  }
+
   // Add trace ID to attributes if available
   const attributes = {};
   if (results.trace_id) attributes.traceId = results.trace_id;
-  if (results.request?.subscription_id) attributes.subscriptionId = results.request.subscription_id;
-  if (results.request?.user_id) attributes.userId = results.request.user_id;
+  // Only add attributes with non-empty values
+  if (results.request?.subscription_id && results.request.subscription_id !== "") {
+    attributes.subscriptionId = results.request.subscription_id;
+  }
+  if (results.request?.user_id && results.request.user_id !== "") {
+    attributes.userId = results.request.user_id;
+  }
 
   console.log(`Publishing analysis results to topic: ${topic.name}`, { traceId: results.trace_id });
   
