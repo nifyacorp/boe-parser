@@ -16,12 +16,16 @@ export async function analyzeText(req, res, next) {
   try {
     // Validation is now handled by middleware
 
-    const { texts, subscription_id, user_id, date, service } = req.body;
+    const { texts, subscription_id, user_id, date, service, metadata } = req.body;
+    
+    // Extract user_id and subscription_id from metadata if not directly provided
+    const effectiveUserId = user_id || metadata?.user_id || "";
+    const effectiveSubscriptionId = subscription_id || metadata?.subscription_id || "";
     
     // Generate trace ID for tracking
     const traceId = randomUUID();
     
-    console.log(`Processing BOE analysis request - Request ID: ${req.id}, Trace ID: ${traceId}, Prompts: ${texts.length}, Service: gemini`);
+    console.log(`Processing BOE analysis request - Request ID: ${req.id}, Trace ID: ${traceId}, Prompts: ${texts.length}, User ID: ${effectiveUserId}, Subscription ID: ${effectiveSubscriptionId}, Service: gemini`);
     
     // Fetch and parse BOE content
     const { boeContent, prompts } = await parseBOE({
@@ -37,14 +41,13 @@ export async function analyzeText(req, res, next) {
     
     const analysisResults = await Promise.all(analysisPromises);
     
-    // Prepare response structure with default empty string values for subscription_id and user_id
-    // to ensure compatibility with notification worker's schema validation
+    // Prepare response structure with the extracted user_id and subscription_id
     const response = {
       trace_id: traceId,
       request: {
         texts: prompts,
-        subscription_id: subscription_id || "",
-        user_id: user_id || ""
+        subscription_id: effectiveSubscriptionId,
+        user_id: effectiveUserId
       },
       results: {
         boe_info: boeContent.boe_info,

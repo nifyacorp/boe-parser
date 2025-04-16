@@ -164,6 +164,23 @@ export async function publishResults(results) {
       return null;
   }
 
+  // Check for user_id and subscription_id in metadata if not in request
+  if (results.request) {
+    // If request.user_id is empty but exists in metadata, use that value
+    if ((!results.request.user_id || results.request.user_id === "") && 
+        results.metadata?.user_id) {
+      results.request.user_id = results.metadata.user_id;
+      console.log(`Using user_id from metadata: ${results.request.user_id}`);
+    }
+    
+    // If request.subscription_id is empty but exists in metadata, use that value
+    if ((!results.request.subscription_id || results.request.subscription_id === "") && 
+        results.metadata?.subscription_id) {
+      results.request.subscription_id = results.metadata.subscription_id;
+      console.log(`Using subscription_id from metadata: ${results.request.subscription_id}`);
+    }
+  }
+
   // Validate the message against the schema before publishing
   try {
     validateBoeParserMessage(results);
@@ -196,8 +213,8 @@ export async function publishResults(results) {
   console.log('PubSub message structure:', {
     trace_id: results.trace_id,
     request: {
-      subscription_id: results.request?.subscription_id,
-      user_id: results.request?.user_id,
+      subscription_id: results.request?.subscription_id || '(empty)',
+      user_id: results.request?.user_id || '(empty)',
       texts: results.request?.texts?.map(t => t.substring(0, 30) + (t.length > 30 ? '...' : ''))
     },
     results_summary: {
